@@ -14,6 +14,7 @@ import { stripe } from "@better-auth/stripe";
 import { getStripeClient, isStripeEnabled } from "./billing/stripe";
 import { grantSignupCredits } from "./billing/credit";
 import { patSignIn } from "./auth-plugins/pat-signin";
+import { githubAuthorizationEndpoint } from "./github-emulator";
 
 async function getOctokitUser(token: string) {
 	const cached = await redis.get<ReturnType<(typeof octokit)["users"]["getAuthenticated"]>>(
@@ -80,6 +81,10 @@ export const auth = betterAuth({
 	],
 	user: {
 		additionalFields: {
+			githubLogin: {
+				type: "string",
+				required: false,
+			},
 			githubPat: {
 				type: "string",
 				required: false,
@@ -104,6 +109,11 @@ export const auth = betterAuth({
 		github: {
 			clientId: process.env.GITHUB_CLIENT_ID!,
 			clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+			// Only set when a local GitHub emulator is configured; the rest of the
+			// flow follows the `fetch` rewrite in `github-emulator.ts`.
+			...(githubAuthorizationEndpoint
+				? { authorizationEndpoint: githubAuthorizationEndpoint }
+				: {}),
 			// Minimal default — the sign-in UI lets users opt into more
 			scope: ["read:user", "user:email", "public_repo"],
 			async mapProfileToUser(profile) {

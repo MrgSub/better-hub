@@ -21,10 +21,13 @@ export const githubEmulatorOrigin: string | null = readEmulatorOrigin();
 function readEmulatorOrigin(): string | null {
 	const raw = process.env.GITHUB_EMULATOR_URL?.trim();
 	if (!raw) return null;
-	if (
+	// `next build` also runs with NODE_ENV=production, so only a running
+	// production server is worth refusing — otherwise anyone with the emulator
+	// configured could no longer build.
+	const servingProduction =
 		process.env.NODE_ENV === "production" &&
-		!process.env.ALLOW_GITHUB_EMULATOR_IN_PRODUCTION
-	) {
+		process.env.NEXT_PHASE !== "phase-production-build";
+	if (servingProduction && !process.env.ALLOW_GITHUB_EMULATOR_IN_PRODUCTION) {
 		throw new Error(
 			"GITHUB_EMULATOR_URL is set in production; refusing to route GitHub traffic at an emulator",
 		);

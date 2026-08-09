@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORIGIN = "http://localhost:4000";
 
-async function load(env: { url?: string; nodeEnv?: string; allow?: string }) {
+async function load(env: { url?: string; nodeEnv?: string; allow?: string; phase?: string }) {
 	vi.resetModules();
 	vi.stubEnv("GITHUB_EMULATOR_URL", env.url ?? "");
 	vi.stubEnv("NODE_ENV", env.nodeEnv ?? "test");
 	vi.stubEnv("ALLOW_GITHUB_EMULATOR_IN_PRODUCTION", env.allow ?? "");
+	vi.stubEnv("NEXT_PHASE", env.phase ?? "");
 	return import("./github-emulator");
 }
 
@@ -85,5 +86,14 @@ describe("github emulator", () => {
 		);
 		const forced = await load({ url: ORIGIN, nodeEnv: "production", allow: "1" });
 		expect(forced.githubEmulatorOrigin).toBe(ORIGIN);
+	});
+
+	it("still allows a production build, which shares NODE_ENV with the server", async () => {
+		const built = await load({
+			url: ORIGIN,
+			nodeEnv: "production",
+			phase: "phase-production-build",
+		});
+		expect(built.githubEmulatorOrigin).toBe(ORIGIN);
 	});
 });

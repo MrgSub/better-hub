@@ -40,6 +40,7 @@ export interface GitProvider {
 	deleteRepo(r: RepoRef): Promise<void>;
 
 	listBranches(r: RepoRef, cursor?: string): Promise<Page<BranchRef>>;
+	/** `from` is an existing ref name, not a sha. */
 	createBranch(r: RepoRef, name: string, from: string): Promise<BranchRef>;
 	deleteBranch(r: RepoRef, name: string): Promise<void>;
 	listTags(r: RepoRef, cursor?: string): Promise<Page<TagRef>>;

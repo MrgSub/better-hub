@@ -290,12 +290,13 @@ async function land(
 		return { ok: false, error: (error as Error).message };
 	}
 
-	// Cut from the base tip the resolution was computed against, so a base that
-	// moves under us invalidates this branch rather than hiding in it.
-	await h.git.deleteBranch(h.ref, branch).catch(() => {});
-	await h.git.createBranch(h.ref, branch, o.baseSha);
-
 	try {
+		// Branches are cut from a ref name, not a sha, so the base tip the
+		// resolution was computed against is enforced on the commit instead: a
+		// base that moved under us refuses it rather than hiding in the branch.
+		await h.git.deleteBranch(h.ref, branch).catch(() => {});
+		await h.git.createBranch(h.ref, branch, pull.baseBranch);
+
 		const commit = await h.git.commitFiles(h.ref, {
 			branch,
 			message:

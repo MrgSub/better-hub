@@ -135,10 +135,11 @@ describe("resolveHostedConflicts", () => {
 			branch: "bh/resolve/7-sha_feature",
 			agent: "test-agent",
 		});
+		// A ref name, not a sha: the base tip is enforced by the commit guard.
 		expect(git.createBranch).toHaveBeenCalledWith(
 			repo.ref,
 			"bh/resolve/7-sha_feature",
-			"sha_main",
+			"main",
 		);
 		// The pull request's own changes come along, or the branch would revert them.
 		expect(git.commitFiles).toHaveBeenCalledWith(

@@ -41,7 +41,7 @@ import { ChatPageActivator } from "@/components/shared/chat-page-activator";
 import { TrackView } from "@/components/shared/track-view";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import { inngest } from "@/lib/inngest";
+import { reportContentViewed } from "@/lib/inngest";
 import { isItemPinned } from "@/lib/pinned-items-store";
 import { all } from "better-all";
 
@@ -224,34 +224,31 @@ export default async function PRDetailPage({
 
 	// Fire-and-forget: embed PR content for semantic search
 	if (session?.user?.id) {
-		void inngest.send({
-			name: "app/content.viewed",
-			data: {
-				userId: session.user.id,
-				contentType: "pr",
-				owner,
-				repo,
-				number: pullNumber,
-				title: pr.title,
-				body: pr.body ?? "",
-				comments: comments.issueComments
-					.filter((c) => c.body)
-					.map((c) => ({
-						id: c.id,
-						body: c.body,
-						author: c.user?.login ?? "unknown",
-						createdAt: c.created_at,
-					})),
-				reviews: reviews
-					.filter((r) => r.body)
-					.map((r) => ({
-						id: r.id,
-						body: r.body!,
-						author: r.user?.login ?? "unknown",
-						state: r.state,
-						createdAt: r.submitted_at ?? "",
-					})),
-			},
+		reportContentViewed({
+			userId: session.user.id,
+			contentType: "pr",
+			owner,
+			repo,
+			number: pullNumber,
+			title: pr.title,
+			body: pr.body ?? "",
+			comments: comments.issueComments
+				.filter((c) => c.body)
+				.map((c) => ({
+					id: c.id,
+					body: c.body,
+					author: c.user?.login ?? "unknown",
+					createdAt: c.created_at,
+				})),
+			reviews: reviews
+				.filter((r) => r.body)
+				.map((r) => ({
+					id: r.id,
+					body: r.body!,
+					author: r.user?.login ?? "unknown",
+					state: r.state,
+					createdAt: r.submitted_at ?? "",
+				})),
 		});
 	}
 

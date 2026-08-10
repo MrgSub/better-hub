@@ -32,6 +32,7 @@ import {
 	hostedTree,
 } from "./repos/hosted-source";
 import {
+	hostedCompare,
 	hostedPull,
 	hostedPullBundle,
 	hostedPullComments,
@@ -1281,6 +1282,17 @@ export async function isBranchBehindBase(
 	headRef: string,
 	headOwner?: string | null,
 ): Promise<boolean> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		// Commits the base carries beyond the merge base are what the head is
+		// behind by, so comparing the other way round answers it.
+		try {
+			return (await hostedCompare(hosted, headRef, baseRef)).ahead_by > 0;
+		} catch {
+			return false;
+		}
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return false;
 	try {
@@ -3935,6 +3947,10 @@ export async function getCrossReferences(
 	repo: string,
 	issueNumber: number,
 ): Promise<CrossReference[]> {
+	// Cross references come from the upstream timeline, which says nothing
+	// about pull requests that only exist here.
+	if (await hostedRepo(owner, repo)) return [];
+
 	const octokit = await getOctokit();
 	if (!octokit) return [];
 
@@ -5731,6 +5747,9 @@ async function fetchCheckStatusForRef(
 	ref: string,
 ): Promise<CheckStatus | null> {
 	if (!octokit) return null;
+	// Repos we host have no CI of their own yet, and the upstream's checks
+	// describe a tree that is no longer the one being reviewed.
+	if (await hostedRepo(owner, repo)) return null;
 
 	let commitStatuses: Awaited<
 		ReturnType<typeof octokit.repos.getCombinedStatusForRef>
@@ -7444,6 +7463,10 @@ export async function getAuthorDossier(
 	repo: string,
 	authorLogin: string,
 ): Promise<AuthorDossierResult | null> {
+	// The dossier is built from the upstream's contribution history, which a
+	// repo we host does not have one of.
+	if (await hostedRepo(owner, repo)) return null;
+
 	try {
 		const cached = await getCachedAuthorDossier<AuthorDossierResult>(
 			owner,

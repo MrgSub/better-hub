@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { cache } from "react";
 import type { Repository } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
@@ -7,6 +8,13 @@ import type { RepoRef } from "@/lib/git/types";
 import type { RepoPageData } from "@/lib/github";
 import type { UpstreamPermission } from "./policy";
 import { findRepository, repositoryPermission } from "./registry";
+import {
+	isMetadataStale,
+	parseLanguages,
+	readUpstreamStarred,
+	syncUpstreamMetadata,
+	upstreamCoordinates,
+} from "./upstream-metadata";
 
 /**
  * Serves code reads from the repository's own git backend instead of GitHub.
@@ -95,17 +103,19 @@ export async function hostedRepoData(h: HostedRepo, permission: UpstreamPermissi
 		archived: record.archived,
 		disabled: false,
 		fork: record.forkOfId !== null,
-		language: null,
-		license: null,
+		language: record.language,
+		license: record.licenseName
+			? { name: record.licenseName, spdx_id: record.licenseSpdx }
+			: null,
 		default_branch: record.defaultBranch,
 		// The pages read this only to tell an empty repository from a populated
 		// one, so a repo with a commit must never report zero.
 		size: record.sizeKb || (head ? 1 : 0),
-		stargazers_count: 0,
-		watchers_count: 0,
-		subscribers_count: 0,
+		stargazers_count: record.stars,
+		watchers_count: record.stars,
+		subscribers_count: record.watchers,
 		forks_count: await prisma.repository.count({ where: { forkOfId: record.id } }),
-		open_issues_count: 0,
+		open_issues_count: record.openIssues,
 		has_discussions: false,
 		created_at: record.createdAt.toISOString(),
 		updated_at: record.updatedAt.toISOString(),
@@ -134,22 +144,59 @@ export async function hostedRepoData(h: HostedRepo, permission: UpstreamPermissi
  */
 export async function hostedPageData(
 	h: HostedRepo,
-	viewer: { userId: string | null; login: string | null },
+	viewer: { userId: string | null; login: string | null; token?: string },
 ): Promise<RepoPageData> {
-	const permission = await repositoryPermission(h.record, viewer.userId);
+	// Read-only upstream data is refreshed in the background: the page renders
+	// the stored copy, so GitHub being slow or down costs nothing here.
+	if (viewer.token && isMetadataStale(h.record)) {
+		waitUntil(syncUpstreamMetadata(h.record, viewer.token));
+	}
+
+	const [permission, starred] = await Promise.all([
+		repositoryPermission(h.record, viewer.userId),
+		viewer.token ? readUpstreamStarred(h.record, viewer.token) : false,
+	]);
 	const [repoData, latestCommit] = await Promise.all([
 		hostedRepoData(h, permission),
 		hostedHead(h),
 	]);
 	return {
 		repoData,
-		navCounts: { openPrs: 0, openIssues: 0, activeRuns: 0, discussions: 0 },
-		languages: {},
+		// Issues still live upstream, so their count is the copied one; pull
+		// requests become ours, so theirs stays zero until that table exists.
+		navCounts: {
+			openPrs: 0,
+			openIssues: h.record.openIssues,
+			activeRuns: 0,
+			discussions: 0,
+		},
+		languages: parseLanguages(h.record),
 		viewerLogin: viewer.login,
-		viewerHasStarred: false,
+		viewerHasStarred: starred,
 		viewerIsOrgMember: h.record.organizationId !== null && permission !== null,
 		latestCommit,
 	};
+}
+
+/**
+ * Where a write against GitHub has to land. Repositories we host keep their
+ * read-only data upstream, so stars and the like target the upstream repo
+ * rather than our (non-existent on GitHub) coordinates.
+ */
+export async function githubCoordinates(owner: string, repo: string): Promise<RepoRef> {
+	const hosted = await hostedRepo(owner, repo);
+	const upstream = hosted && upstreamCoordinates(hosted.record);
+	return upstream ? { owner: upstream.owner, repo: upstream.repo } : { owner, repo };
+}
+
+/** Forces the next page load to re-copy the upstream's read-only data. */
+export async function expireUpstreamMetadata(owner: string, repo: string): Promise<void> {
+	const hosted = await hostedRepo(owner, repo);
+	if (!hosted) return;
+	await prisma.repository.update({
+		where: { id: hosted.record.id },
+		data: { metadataSyncedAt: null },
+	});
 }
 
 /** First README-ish file at the root, read through the backend. */

@@ -4,13 +4,17 @@ import { getOctokit } from "@/lib/github";
 import { getErrorMessage } from "@/lib/utils";
 import { revalidatePath } from "next/cache";
 import { invalidateRepoCache } from "@/lib/repo-data-cache-vc";
+import { expireUpstreamMetadata, githubCoordinates } from "@/lib/repos/hosted-source";
 
 export async function starRepo(owner: string, repo: string) {
 	const octokit = await getOctokit();
 	if (!octokit) return { error: "Not authenticated" };
 	try {
-		await octokit.activity.starRepoForAuthenticatedUser({ owner, repo });
+		await octokit.activity.starRepoForAuthenticatedUser({
+			...(await githubCoordinates(owner, repo)),
+		});
 		invalidateRepoCache(owner, repo);
+		await expireUpstreamMetadata(owner, repo);
 		revalidatePath(`/repos/${owner}/${repo}`);
 		return { success: true };
 	} catch (e: unknown) {
@@ -22,8 +26,11 @@ export async function unstarRepo(owner: string, repo: string) {
 	const octokit = await getOctokit();
 	if (!octokit) return { error: "Not authenticated" };
 	try {
-		await octokit.activity.unstarRepoForAuthenticatedUser({ owner, repo });
+		await octokit.activity.unstarRepoForAuthenticatedUser({
+			...(await githubCoordinates(owner, repo)),
+		});
 		invalidateRepoCache(owner, repo);
+		await expireUpstreamMetadata(owner, repo);
 		revalidatePath(`/repos/${owner}/${repo}`);
 		return { success: true };
 	} catch (e: unknown) {

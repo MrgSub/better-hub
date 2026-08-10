@@ -160,6 +160,16 @@ model Repository {
   archived       Boolean  @default(false)
   /// Checkout size as GitHub reports it, so the overview can show one.
   sizeKb         Int      @default(0)
+  /// Read-only data GitHub still owns, copied here so the overview keeps
+  /// rendering it while GitHub is down.
+  stars            Int       @default(0)
+  watchers         Int       @default(0)
+  openIssues       Int       @default(0)
+  language         String?
+  licenseName      String?
+  licenseSpdx      String?
+  languagesJson    String?
+  metadataSyncedAt DateTime?
   upstreamHost   String?
   upstreamOwner  String?
   upstreamName   String?

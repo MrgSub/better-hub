@@ -7060,6 +7060,7 @@ async function hostedPageDataResult(
 		data: await hostedPageData(hosted, {
 			userId: authCtx.userId,
 			login: authCtx.githubUser?.login ?? null,
+			token: authCtx.token,
 		}),
 	};
 }

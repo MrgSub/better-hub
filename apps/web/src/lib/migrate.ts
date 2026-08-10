@@ -14,6 +14,7 @@ import {
 	syncOrganizationMembership,
 	upstreamIdentity,
 } from "@/lib/repos/registry";
+import { syncUpstreamMetadata } from "@/lib/repos/upstream-metadata";
 
 export interface UpstreamTarget {
 	owner: string;
@@ -271,6 +272,9 @@ export async function migrateRepository(input: MigrateInput): Promise<MigrationR
 			: {}),
 	});
 	await grantCollaborator(record.id, input.actor.userId, "admin");
+	// Stars, languages and licence stay GitHub's to report; copying them now
+	// means the overview has them before anyone opens the page.
+	await syncUpstreamMetadata(record, input.actor.token);
 
 	return await finish(git, decision.kind, target, repo, input);
 }

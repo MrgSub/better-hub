@@ -35,6 +35,14 @@ function record(overrides: Partial<Repository> = {}): Repository {
 		isPrivate: false,
 		archived: false,
 		sizeKb: 0,
+		stars: 0,
+		watchers: 0,
+		openIssues: 0,
+		language: null,
+		licenseName: null,
+		licenseSpdx: null,
+		languagesJson: null,
+		metadataSyncedAt: null,
 		upstreamHost: null,
 		upstreamOwner: null,
 		upstreamName: null,
@@ -164,6 +172,31 @@ describe("hostedRepoData", () => {
 			html_url: "https://github.com/adam/hello",
 			pushed_at: "2026-01-01T00:00:00Z",
 			permissions: { admin: false, push: true, pull: true },
+		});
+	});
+
+	it("surfaces the read-only data copied from the upstream", async () => {
+		const data = await hostedRepoData(
+			repo(
+				{ listCommits: vi.fn().mockResolvedValue(head) },
+				record({
+					stars: 42,
+					watchers: 7,
+					openIssues: 3,
+					language: "TypeScript",
+					licenseName: "MIT License",
+					licenseSpdx: "MIT",
+				}),
+			),
+			"admin",
+		);
+
+		expect(data).toMatchObject({
+			stargazers_count: 42,
+			subscribers_count: 7,
+			open_issues_count: 3,
+			language: "TypeScript",
+			license: { name: "MIT License", spdx_id: "MIT" },
 		});
 	});
 

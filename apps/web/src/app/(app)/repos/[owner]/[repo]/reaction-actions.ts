@@ -1,7 +1,13 @@
 "use server";
 
 import { getOctokit, getAuthenticatedUser } from "@/lib/github";
+import { hostedRepo } from "@/lib/repos/hosted-source";
 import { getErrorMessage } from "@/lib/utils";
+
+/// Reactions on repos we host belong to our own pull requests, which have
+/// nowhere to store them yet — asking GitHub would answer about an unrelated
+/// upstream number, so we say "none" instead of reaching for it.
+const HOSTED_REACTIONS_UNSUPPORTED = "Reactions aren't available on this repository yet";
 
 export type ReactionContent =
 	| "+1"
@@ -29,6 +35,8 @@ export async function getReactionUsers(
 	contentType: "issue" | "issueComment" | "pullRequestReviewComment",
 	contentId: number,
 ): Promise<{ users: ReactionWithId[]; error?: string }> {
+	if (await hostedRepo(owner, repo)) return { users: [] };
+
 	const octokit = await getOctokit();
 	if (!octokit) return { users: [], error: "Not authenticated" };
 
@@ -77,6 +85,9 @@ export async function addReaction(
 	contentId: number,
 	content: ReactionContent,
 ): Promise<{ success: boolean; reactionId?: number; error?: string }> {
+	if (await hostedRepo(owner, repo))
+		return { success: false, error: HOSTED_REACTIONS_UNSUPPORTED };
+
 	const octokit = await getOctokit();
 	if (!octokit) return { success: false, error: "Not authenticated" };
 
@@ -118,6 +129,9 @@ export async function removeReaction(
 	contentId: number,
 	reactionId: number,
 ): Promise<{ success: boolean; error?: string }> {
+	if (await hostedRepo(owner, repo))
+		return { success: false, error: HOSTED_REACTIONS_UNSUPPORTED };
+
 	const octokit = await getOctokit();
 	if (!octokit) return { success: false, error: "Not authenticated" };
 

@@ -24,10 +24,14 @@ import {
 	hostedCommits,
 	hostedContents,
 	hostedFileContent,
+	hostedPageData,
+	hostedReadme,
 	hostedRepo,
+	hostedRepoData,
 	hostedTags,
 	hostedTree,
 } from "./repos/hosted-source";
+import { repositoryPermission } from "./repos/registry";
 
 export type RepoPermissions = {
 	admin: boolean;
@@ -2773,6 +2777,17 @@ export async function getTrendingRepos(
 
 export async function getRepo(owner: string, repo: string) {
 	const authCtx = await getGitHubAuthContext();
+
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoFromGitHub>>>(
+			await hostedRepoData(
+				hosted,
+				await repositoryPermission(hosted.record, authCtx?.userId ?? null),
+			),
+		);
+	}
+
 	const cacheKey = buildRepoCacheKey(owner, repo);
 
 	return readLocalFirstGitData({
@@ -3019,6 +3034,13 @@ export async function getFileContent(owner: string, repo: string, path: string, 
 }
 
 export async function getRepoReadme(owner: string, repo: string, ref?: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoReadmeFromGitHub>>>(
+			await hostedReadme(hosted, ref),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	const normalizedRef = normalizeRef(ref);
 	const cacheKey = buildRepoReadmeCacheKey(owner, repo, normalizedRef);
@@ -7024,6 +7046,19 @@ export const getRepoPageData = cache(
 	async (owner: string, repo: string): Promise<RepoPageDataResult> => {
 		const authCtx = await getGitHubAuthContext();
 		if (!authCtx) return { success: false, error: "Not authenticated" };
+
+		// Repositories we host answer from Postgres and their git backend, so
+		// they need no GitHub round trip and no cache of one.
+		const hosted = await hostedRepo(owner, repo);
+		if (hosted) {
+			return {
+				success: true,
+				data: await hostedPageData(hosted, {
+					userId: authCtx.userId,
+					login: authCtx.githubUser?.login ?? null,
+				}),
+			};
+		}
 
 		const { getCachedRepoPageData } = await import("@/lib/repo-data-cache-vc");
 		const cached = await getCachedRepoPageData<RepoPageData>(

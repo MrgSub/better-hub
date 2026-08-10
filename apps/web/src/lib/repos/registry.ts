@@ -63,10 +63,19 @@ export function findRepository(owner: string, name: string): Promise<Repository 
 	});
 }
 
+export interface RepositoryMetadata {
+	description?: string | null;
+	homepage?: string | null;
+	topics?: string[];
+	isPrivate?: boolean;
+	sizeKb?: number;
+}
+
 export interface RecordRepositoryInput {
 	repo: RepoGitInfo;
 	backend: string;
 	ownerUserId: string;
+	metadata?: RepositoryMetadata;
 	/** Set on the canonical import only; forks inherit their parent's. */
 	upstream?: UpstreamIdentity;
 	organizationId?: string;
@@ -81,6 +90,11 @@ export function recordRepository(input: RecordRepositoryInput): Promise<Reposito
 			defaultBranch: input.repo.defaultBranch,
 			gitBackend: input.backend,
 			gitRepoId: input.repo.id,
+			description: input.metadata?.description ?? null,
+			homepage: input.metadata?.homepage ?? null,
+			topics: input.metadata?.topics ?? [],
+			isPrivate: input.metadata?.isPrivate ?? false,
+			sizeKb: input.metadata?.sizeKb ?? 0,
 			upstreamHost: input.upstream?.host ?? null,
 			upstreamOwner: input.upstream?.owner ?? null,
 			upstreamName: input.upstream?.name ?? null,
@@ -89,6 +103,38 @@ export function recordRepository(input: RecordRepositoryInput): Promise<Reposito
 			ownerUserId: input.ownerUserId,
 		},
 	});
+}
+
+/**
+ * What the viewer may do here: owning it, or admin of the owning org, is
+ * admin; org members and collaborators get their recorded permission.
+ */
+export async function repositoryPermission(
+	repository: Repository,
+	userId: string | null,
+): Promise<UpstreamPermission | null> {
+	if (!userId) return null;
+	if (repository.ownerUserId === userId) return "admin";
+
+	const [collaborator, membership] = await Promise.all([
+		prisma.repositoryCollaborator.findUnique({
+			where: { repositoryId_userId: { repositoryId: repository.id, userId } },
+		}),
+		repository.organizationId
+			? prisma.organizationMember.findUnique({
+					where: {
+						organizationId_userId: {
+							organizationId: repository.organizationId,
+							userId,
+						},
+					},
+				})
+			: null,
+	]);
+
+	if (membership?.role === "admin") return "admin";
+	if (collaborator) return collaborator.permission as UpstreamPermission;
+	return membership ? "write" : null;
 }
 
 export async function grantCollaborator(

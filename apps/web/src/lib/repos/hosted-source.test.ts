@@ -1,13 +1,58 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Repository } from "@/generated/prisma/client";
 import type { GitProvider } from "@/lib/git/provider";
 import type { CommitSummary, Page, TreeEntry } from "@/lib/git/types";
-import { hostedCommits, hostedContents, hostedFileContent, type HostedRepo } from "./hosted-source";
 
-function repo(git: Partial<GitProvider>): HostedRepo {
+vi.mock("@/lib/db", () => ({
+	prisma: {
+		repository: {
+			count: vi.fn().mockResolvedValue(0),
+			findUnique: vi.fn().mockResolvedValue(null),
+		},
+	},
+}));
+
+import {
+	hostedCommits,
+	hostedContents,
+	hostedFileContent,
+	hostedReadme,
+	hostedRepoData,
+	type HostedRepo,
+} from "./hosted-source";
+
+function record(overrides: Partial<Repository> = {}): Repository {
+	return {
+		id: "repo_1",
+		owner: "adam",
+		name: "hello",
+		defaultBranch: "main",
+		gitBackend: "code-storage",
+		gitRepoId: "adam/hello",
+		description: null,
+		homepage: null,
+		topics: [],
+		isPrivate: false,
+		archived: false,
+		sizeKb: 0,
+		upstreamHost: null,
+		upstreamOwner: null,
+		upstreamName: null,
+		forkOfId: null,
+		ownerUserId: "user_1",
+		organizationId: null,
+		createdAt: new Date("2026-01-01T00:00:00.000Z"),
+		updatedAt: new Date("2026-01-02T00:00:00.000Z"),
+		...overrides,
+	} as Repository;
+}
+
+function repo(git: Partial<GitProvider>, row: Repository = record()): HostedRepo {
 	return {
 		ref: { owner: "adam", repo: "hello" },
 		git: git as GitProvider,
 		defaultBranch: "main",
+		record: row,
 	};
 }
 
@@ -88,6 +133,86 @@ describe("hostedFileContent", () => {
 		const getFileContent = vi.fn();
 		expect(await hostedFileContent(repo({ getFileContent }), "")).toBeNull();
 		expect(getFileContent).not.toHaveBeenCalled();
+	});
+});
+
+describe("hostedRepoData", () => {
+	const head = { items: [commit("head")], nextCursor: null, hasMore: false };
+
+	it("describes the repository from our own record", async () => {
+		const data = await hostedRepoData(
+			repo(
+				{ listCommits: vi.fn().mockResolvedValue(head) },
+				record({
+					description: "hosted here",
+					topics: ["git"],
+					isPrivate: true,
+					upstreamHost: "github.com",
+					upstreamOwner: "adam",
+					upstreamName: "hello",
+				}),
+			),
+			"write",
+		);
+
+		expect(data).toMatchObject({
+			full_name: "adam/hello",
+			description: "hosted here",
+			topics: ["git"],
+			private: true,
+			default_branch: "main",
+			html_url: "https://github.com/adam/hello",
+			pushed_at: "2026-01-01T00:00:00Z",
+			permissions: { admin: false, push: true, pull: true },
+		});
+	});
+
+	// `size === 0` is how the pages spot an empty repository.
+	it("reports a size for a repository with commits but no recorded size", async () => {
+		const withCommits = await hostedRepoData(
+			repo({ listCommits: vi.fn().mockResolvedValue(head) }),
+			"admin",
+		);
+		expect(withCommits.size).toBe(1);
+
+		const empty = await hostedRepoData(
+			repo({
+				listCommits: vi.fn().mockResolvedValue({
+					items: [],
+					nextCursor: null,
+					hasMore: false,
+				}),
+			}),
+			"admin",
+		);
+		expect(empty.size).toBe(0);
+	});
+});
+
+describe("hostedReadme", () => {
+	it("reads the root readme through the backend", async () => {
+		const entries: TreeEntry[] = [
+			{ path: "src", type: "tree", mode: "040000", size: null },
+			{ path: "Readme.md", type: "blob", mode: "100644", size: 3 },
+		];
+		const getFileContent = vi.fn().mockResolvedValue({
+			path: "Readme.md",
+			ref: "main",
+			content: new TextEncoder().encode("hi"),
+			size: 2,
+			binary: false,
+		});
+
+		const readme = await hostedReadme(
+			repo({ listFiles: vi.fn().mockResolvedValue(entries), getFileContent }),
+		);
+
+		expect(readme).toMatchObject({ path: "Readme.md", content: "hi" });
+	});
+
+	it("is null when the root has none", async () => {
+		const hosted = repo({ listFiles: vi.fn().mockResolvedValue([]) });
+		expect(await hostedReadme(hosted)).toBeNull();
 	});
 });
 

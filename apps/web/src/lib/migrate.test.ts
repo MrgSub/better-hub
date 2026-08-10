@@ -46,6 +46,8 @@ describe("buildAgentPrompt", () => {
 			private: false,
 			defaultBranch: "master",
 			description: null,
+			homepage: null,
+			topics: [],
 			sizeKb: 1,
 			ownerType: "User",
 			permission: "admin",

@@ -1,8 +1,12 @@
 import { cache } from "react";
+import type { Repository } from "@/generated/prisma/client";
+import { prisma } from "@/lib/db";
 import { getGitProvider, type GitBackend } from "@/lib/git";
 import type { GitProvider } from "@/lib/git/provider";
 import type { RepoRef } from "@/lib/git/types";
-import { findRepository } from "./registry";
+import type { RepoPageData } from "@/lib/github";
+import type { UpstreamPermission } from "./policy";
+import { findRepository, repositoryPermission } from "./registry";
 
 /**
  * Serves code reads from the repository's own git backend instead of GitHub.
@@ -16,6 +20,7 @@ export interface HostedRepo {
 	ref: RepoRef;
 	git: GitProvider;
 	defaultBranch: string;
+	record: Repository;
 }
 
 /**
@@ -29,8 +34,134 @@ export const hostedRepo = cache(async (owner: string, name: string): Promise<Hos
 		ref: { owner: record.owner, repo: record.name },
 		git: getGitProvider(record.gitBackend as GitBackend),
 		defaultBranch: record.defaultBranch,
+		record,
 	};
 });
+
+/**
+ * Tip of the default branch. Cached per request because both the overview and
+ * the emptiness check below need it, and `hostedRepo` hands out a stable value.
+ */
+const hostedHead = cache(async (h: HostedRepo): Promise<RepoPageData["latestCommit"]> => {
+	const page = await h.git.listCommits(h.ref, { branch: h.defaultBranch, limit: 1 });
+	const head = page.items[0];
+	if (!head) return null;
+	return {
+		sha: head.sha,
+		message: head.message.split("\n")[0] ?? "",
+		date: head.date,
+		author: { login: head.author.name, avatarUrl: "" },
+	};
+});
+
+function grantsOf(permission: UpstreamPermission | null) {
+	return {
+		admin: permission === "admin",
+		maintain: permission === "admin",
+		push: permission === "admin" || permission === "write",
+		triage: permission === "admin" || permission === "write",
+		pull: true,
+	};
+}
+
+/**
+ * Everything the overview needs about the repository itself, from our own
+ * record plus the backend — no GitHub call, so it survives their outages.
+ * Shaped like the REST payload `repos.get` returns, which is a superset of
+ * what `RepoPageData.repoData` declares.
+ */
+export async function hostedRepoData(h: HostedRepo, permission: UpstreamPermission | null) {
+	const { record } = h;
+	const [head, parent] = await Promise.all([
+		hostedHead(h),
+		record.forkOfId
+			? prisma.repository.findUnique({ where: { id: record.forkOfId } })
+			: null,
+	]);
+	const upstreamUrl =
+		record.upstreamHost && record.upstreamOwner && record.upstreamName
+			? `https://${record.upstreamHost}/${record.upstreamOwner}/${record.upstreamName}`
+			: null;
+
+	return {
+		id: record.id,
+		node_id: record.id,
+		name: record.name,
+		full_name: `${record.owner}/${record.name}`,
+		description: record.description ?? undefined,
+		topics: record.topics,
+		homepage: record.homepage,
+		private: record.isPrivate,
+		archived: record.archived,
+		disabled: false,
+		fork: record.forkOfId !== null,
+		language: null,
+		license: null,
+		default_branch: record.defaultBranch,
+		// The pages read this only to tell an empty repository from a populated
+		// one, so a repo with a commit must never report zero.
+		size: record.sizeKb || (head ? 1 : 0),
+		stargazers_count: 0,
+		watchers_count: 0,
+		subscribers_count: 0,
+		forks_count: await prisma.repository.count({ where: { forkOfId: record.id } }),
+		open_issues_count: 0,
+		has_discussions: false,
+		created_at: record.createdAt.toISOString(),
+		updated_at: record.updatedAt.toISOString(),
+		pushed_at: head?.date ?? record.updatedAt.toISOString(),
+		html_url: upstreamUrl ?? `/${record.owner}/${record.name}`,
+		owner: {
+			login: record.owner,
+			avatar_url: `https://github.com/${record.owner}.png`,
+			type: record.organizationId ? "Organization" : "User",
+		},
+		permissions: grantsOf(permission),
+		parent: parent
+			? {
+					full_name: `${parent.owner}/${parent.name}`,
+					owner: { login: parent.owner },
+					name: parent.name,
+				}
+			: null,
+	};
+}
+
+/**
+ * The repository page bundle GitHub answers with one GraphQL call. Counts that
+ * belong to collaboration data we have not migrated yet are zero rather than
+ * guessed.
+ */
+export async function hostedPageData(
+	h: HostedRepo,
+	viewer: { userId: string | null; login: string | null },
+): Promise<RepoPageData> {
+	const permission = await repositoryPermission(h.record, viewer.userId);
+	const [repoData, latestCommit] = await Promise.all([
+		hostedRepoData(h, permission),
+		hostedHead(h),
+	]);
+	return {
+		repoData,
+		navCounts: { openPrs: 0, openIssues: 0, activeRuns: 0, discussions: 0 },
+		languages: {},
+		viewerLogin: viewer.login,
+		viewerHasStarred: false,
+		viewerIsOrgMember: h.record.organizationId !== null && permission !== null,
+		latestCommit,
+	};
+}
+
+/** First README-ish file at the root, read through the backend. */
+export async function hostedReadme(h: HostedRepo, ref?: string) {
+	const at = ref || h.defaultBranch;
+	const entries = await h.git.listFiles(h.ref, at, { path: "" });
+	const readme = entries.find(
+		(e) => e.type === "blob" && e.path.toLowerCase().startsWith("readme"),
+	);
+	if (!readme) return null;
+	return await hostedFileContent(h, readme.path, at);
+}
 
 export async function hostedTree(h: HostedRepo, ref: string, recursive: boolean) {
 	const entries = await h.git.listFiles(h.ref, ref, { recursive });

@@ -24,6 +24,8 @@ export interface ResolvedUpstream extends UpstreamTarget {
 	private: boolean;
 	defaultBranch: string;
 	description: string | null;
+	homepage: string | null;
+	topics: string[];
 	sizeKb: number;
 	ownerType: "User" | "Organization";
 	/** The signed-in user's permission on the upstream. */
@@ -99,6 +101,8 @@ export async function resolveUpstream(
 			private: data.private,
 			defaultBranch: data.default_branch,
 			description: data.description,
+			homepage: data.homepage ?? null,
+			topics: data.topics ?? [],
 			sizeKb: data.size,
 			ownerType,
 			permission: toUpstreamPermission(data.permissions),
@@ -253,6 +257,13 @@ export async function migrateRepository(input: MigrateInput): Promise<MigrationR
 		repo,
 		backend: git.backend,
 		ownerUserId: input.actor.userId,
+		metadata: {
+			description: input.upstream.description,
+			homepage: input.upstream.homepage,
+			topics: input.upstream.topics,
+			isPrivate: input.upstream.private,
+			sizeKb: input.upstream.sizeKb,
+		},
 		...(decision.kind === "create" ? { upstream: identity } : {}),
 		...(organizationId ? { organizationId } : {}),
 		...(decision.kind === "fork" && decision.source === "canonical" && canonical

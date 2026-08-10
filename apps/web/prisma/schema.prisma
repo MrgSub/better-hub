@@ -153,6 +153,13 @@ model Repository {
   defaultBranch  String
   gitBackend     String
   gitRepoId      String
+  description    String?
+  homepage       String?
+  topics         String[] @default([])
+  isPrivate      Boolean  @default(false)
+  archived       Boolean  @default(false)
+  /// Checkout size as GitHub reports it, so the overview can show one.
+  sizeKb         Int      @default(0)
   upstreamHost   String?
   upstreamOwner  String?
   upstreamName   String?

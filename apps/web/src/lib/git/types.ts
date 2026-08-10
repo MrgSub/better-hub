@@ -23,6 +23,13 @@ export interface UpstreamRef {
 	owner: string;
 	name: string;
 	url?: string;
+	/** Upstream branch to track; defaults to the new repo's default branch. */
+	defaultBranch?: string;
+	/**
+	 * How the backend reads the upstream: anonymously, or through the GitHub
+	 * App installation (required for private repositories). Defaults to public.
+	 */
+	auth?: "public" | "installation";
 }
 
 export interface RepoGitInfo {

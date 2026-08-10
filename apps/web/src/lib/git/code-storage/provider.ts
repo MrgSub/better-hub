@@ -112,6 +112,35 @@ export class CodeStorageProvider implements GitProvider {
 								provider: init.baseRepo.provider,
 								owner: init.baseRepo.owner,
 								name: init.baseRepo.name,
+								default_branch:
+									init.baseRepo
+										.defaultBranch ??
+									defaultBranch,
+								// GitHub sync otherwise goes through Code Storage's GitHub
+								// App, which 412s unless it is installed on the upstream.
+								...(init.baseRepo.provider ===
+									"github" &&
+								init.baseRepo.auth !==
+									"installation"
+									? {
+											auth: {
+												auth_type: "public",
+											},
+										}
+									: {}),
+								// Self-hosted providers are addressed by host, not by name.
+								...(init.baseRepo.url &&
+								init.baseRepo.provider === "generic"
+									? {
+											upstream_host:
+												new URL(
+													init
+														.baseRepo
+														.url,
+												)
+													.host,
+										}
+									: {}),
 							},
 						}
 					: {}),

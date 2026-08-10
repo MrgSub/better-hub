@@ -242,5 +242,44 @@ export function runGitProviderContract(name: string, make: () => GitProvider): v
 			expect(url).toContain(`${repo.owner}/${repo.repo}`);
 			expect(url).not.toContain("PRIVATE KEY");
 		});
+
+		it("imports a public upstream repository, history included", async () => {
+			const imported: RepoRef = {
+				owner: repo.owner,
+				repo: `${repo.repo}-import`,
+			};
+			try {
+				await git.createRepo(imported, {
+					defaultBranch: "master",
+					baseRepo: {
+						provider: "github",
+						owner: "octocat",
+						name: "Hello-World",
+					},
+				});
+
+				// The upstream clone runs asynchronously behind the create call.
+				let names: string[] = [];
+				for (let i = 0; i < 20 && !names.includes("master"); i++) {
+					await new Promise((resolve) => setTimeout(resolve, 3000));
+					names = await git
+						.listBranches(imported)
+						.then((page) => page.items.map((b) => b.name))
+						.catch(() => []);
+				}
+				expect(names).toContain("master");
+
+				const readme = await git.getFileContent(
+					imported,
+					"README",
+					"master",
+				);
+				expect(new TextDecoder().decode(readme?.content)).toContain(
+					"Hello World",
+				);
+			} finally {
+				await git.deleteRepo(imported);
+			}
+		});
 	});
 }

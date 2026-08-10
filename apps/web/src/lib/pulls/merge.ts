@@ -113,7 +113,10 @@ export async function mergeHostedPull(
 		}
 
 		const preview = await h.git.previewMerge(h.ref, pull.baseBranch, pull.headBranch);
-		if (preview.status === "conflicted") {
+		// A recorded resolution is a branch off the base carrying the merged tree,
+		// so it is what lands when the head itself cannot.
+		const source = await mergeSource(h, pull, preview.status === "conflicted");
+		if (!source) {
 			await recordConflict(pull, actor, preview.conflicts);
 			return {
 				ok: false,
@@ -122,7 +125,26 @@ export async function mergeHostedPull(
 			};
 		}
 
-		const result = await h.git.merge(h.ref, pull.baseBranch, pull.headBranch, {
+		// The backend has no rebase: `ff_only` is the honest equivalent, and it
+		// only exists once the head already carries the base.
+		if (strategy === "rebase" && preview.mergeBaseSha !== base.sha) {
+			return {
+				ok: false,
+				error: `${pull.headBranch} is behind ${pull.baseBranch} — update the branch before rebasing`,
+			};
+		}
+
+		// Counted before the restack re-targets the children off this branch.
+		const stackedOnHead = await prisma.pullRequest.count({
+			where: {
+				repositoryId: h.record.id,
+				state: "open",
+				baseBranch: pull.headBranch,
+				id: { not: pull.id },
+			},
+		});
+
+		const result = await h.git.merge(h.ref, pull.baseBranch, source, {
 			author: gitActor(actor),
 			strategy,
 			message:
@@ -141,6 +163,10 @@ export async function mergeHostedPull(
 			};
 		}
 
+		if (source !== pull.headBranch) {
+			await h.git.deleteBranch(h.ref, source).catch(() => {});
+		}
+
 		const merged = await prisma.pullRequest.update({
 			where: { id: pull.id },
 			data: {
@@ -151,6 +177,8 @@ export async function mergeHostedPull(
 				mergedAt: new Date(),
 				mergedById: actor.userId,
 				closedAt: new Date(),
+				resolutionBranch: null,
+				resolutionSha: null,
 				events: {
 					create: {
 						kind: "merged",
@@ -160,6 +188,11 @@ export async function mergeHostedPull(
 							strategy,
 							sha: result.sha,
 							headSha: head.sha,
+							...(source === pull.headBranch
+								? {}
+								: {
+										resolvedBy: pull.resolutionBy,
+									}),
 						}),
 					},
 				},
@@ -168,23 +201,52 @@ export async function mergeHostedPull(
 
 		const restacked = await restackChildren(h, actor, merged, pull.baseBranch);
 
-		// A branch another pull request still stacks on has to outlive this
-		// merge, whatever the checkbox said.
-		if (input.deleteBranch && !restacked.some((r) => r.status === "conflicted")) {
-			const stillNeeded = await prisma.pullRequest.count({
-				where: {
-					repositoryId: h.record.id,
-					state: "open",
-					baseBranch: pull.headBranch,
-				},
-			});
-			if (stillNeeded === 0) {
-				await h.git.deleteBranch(h.ref, pull.headBranch).catch(() => {});
-			}
+		// A branch another pull request was stacked on has to outlive this merge:
+		// a child that failed to restack is still explained by it, and one that
+		// succeeded may still be checked out by a reviewer.
+		if (input.deleteBranch && stackedOnHead === 0) {
+			await h.git.deleteBranch(h.ref, pull.headBranch).catch(() => {});
 		}
 
 		return { ok: true, sha: result.sha, restacked };
 	});
+}
+
+/** Branch names are derived, so a repeated attempt reuses one name per tip. */
+export function resolutionBranchName(number: number, headSha: string): string {
+	return `bh/resolve/${number}-${headSha.slice(0, 12)}`;
+}
+
+/**
+ * What actually gets merged: the head branch, or a resolution branch we already
+ * proved merges cleanly. A resolution is only usable while the base still points
+ * where it did when the resolution was cut, so a moved base drops it.
+ */
+async function mergeSource(
+	h: HostedRepo,
+	pull: PullRequest,
+	conflicted: boolean,
+): Promise<string | null> {
+	if (!conflicted) return pull.headBranch;
+	if (!pull.resolutionBranch) return null;
+	// The branch name carries the tip it was resolved from, so a head that moved
+	// since cannot be merged through a resolution that predates its commits.
+	const stale = pull.resolutionBranch !== resolutionBranchName(pull.number, pull.headSha);
+
+	const preview = stale
+		? null
+		: await h.git
+				.previewMerge(h.ref, pull.baseBranch, pull.resolutionBranch)
+				.catch(() => null);
+	if (!preview || preview.status === "conflicted") {
+		await h.git.deleteBranch(h.ref, pull.resolutionBranch).catch(() => {});
+		await prisma.pullRequest.update({
+			where: { id: pull.id },
+			data: { resolutionBranch: null, resolutionSha: null, resolutionBy: null },
+		});
+		return null;
+	}
+	return pull.resolutionBranch;
 }
 
 async function recordConflict(

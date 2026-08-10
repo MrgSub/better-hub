@@ -438,7 +438,10 @@ export class CodeStorageProvider implements GitProvider {
 				body: JSON.stringify({
 					source_branch: head,
 					target_branch: base,
-					strategy: o.strategy === "rebase" ? "rebase" : "merge",
+					// The backend has no rebase: `ff_only` is the closest true
+					// equivalent — a linear result, refused rather than faked
+					// when the head does not already carry the target.
+					strategy: o.strategy === "rebase" ? "ff_only" : "merge",
 					squash,
 					commit_message: o.message ?? `Merge ${head} into ${base}`,
 					author: { name: o.author.name, email: o.author.email },

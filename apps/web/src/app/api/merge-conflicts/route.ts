@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "@/lib/auth";
 import { getOctokit } from "@/lib/github";
 import { type BlobReader, conflictFiles, hostedConflicts } from "@/lib/pulls/conflicts";
 import { hostedRepo } from "@/lib/repos/hosted-source";
+import { repositoryPermission } from "@/lib/repos/registry";
 import { getErrorMessage } from "@/lib/utils";
 
 interface GitHubFileContent {
@@ -27,6 +29,20 @@ export async function GET(request: NextRequest) {
 	// not exist on GitHub at all.
 	const hosted = await hostedRepo(owner, repo);
 	if (hosted) {
+		// Conflict data is file content from both branches, so it is gated the
+		// same way resolving is: our own permissions, not GitHub's.
+		const session = await getServerSession();
+		const userId = session?.user?.id ?? null;
+		if (!userId) {
+			return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+		}
+		const permission = await repositoryPermission(hosted.record, userId);
+		if (permission !== "admin" && permission !== "write") {
+			return NextResponse.json(
+				{ error: "You do not have write access to this repository" },
+				{ status: 403 },
+			);
+		}
 		try {
 			return NextResponse.json(await hostedConflicts(hosted, base, head));
 		} catch (e: unknown) {

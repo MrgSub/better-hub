@@ -514,8 +514,9 @@ export function PRConflictResolver({
 	};
 
 	/**
-	 * Hands the whole set to an agent instead of picking hunks. It commits to
-	 * the head branch, so the outcome is reviewed like any other push.
+	 * Hands the whole set to an agent instead of picking hunks. The result is a
+	 * resolution the backend has already called mergeable, held against the pull
+	 * request until a person merges it.
 	 */
 	const resolveAutomatically = () => {
 		startTransition(async () => {
@@ -528,7 +529,10 @@ export function PRConflictResolver({
 				setCommitResult({ type: "error", message: result.error });
 				return;
 			}
-			setCommitResult({ type: "success", message: "Conflicts resolved!" });
+			setCommitResult({
+				type: "success",
+				message: "Conflicts resolved — review the merge and land it",
+			});
 			emit({ type: "pr:conflict-resolved", owner, repo, number: pullNumber });
 			setTimeout(() => {
 				window.location.href = `/${owner}/${repo}/pulls/${pullNumber}`;

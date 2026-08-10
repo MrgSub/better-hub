@@ -6,6 +6,7 @@ import type { HostedRepo } from "@/lib/repos/hosted-source";
 vi.mock("@/lib/db", () => ({
 	prisma: {
 		pullRequest: { findFirst: vi.fn(), update: vi.fn() },
+		pullRequestEvent: { create: vi.fn() },
 	},
 }));
 vi.mock("@/lib/repos/registry", () => ({ repositoryPermission: vi.fn() }));
@@ -33,6 +34,37 @@ const pull = {
 function hosted(previewAfter: "clean" | "conflicted") {
 	const git = {
 		commitFiles: vi.fn().mockResolvedValue({ sha: "sha_resolved" }),
+		createBranch: vi.fn().mockResolvedValue({ name: "bh/resolve", sha: "sha_main" }),
+		deleteBranch: vi.fn().mockResolvedValue(undefined),
+		compare: vi.fn().mockResolvedValue({
+			baseSha: "sha_main",
+			headSha: "sha_feature",
+			mergeBaseSha: "sha_base",
+			files: [
+				{
+					path: "src/a.ts",
+					status: "M",
+					patch: null,
+					truncated: false,
+					bytes: null,
+				},
+				{
+					path: "src/b.ts",
+					status: "M",
+					patch: null,
+					truncated: false,
+					bytes: null,
+				},
+			],
+			stats: { files: 2, additions: 2, deletions: 0 },
+		}),
+		getFileContent: vi.fn().mockResolvedValue({
+			path: "src/b.ts",
+			ref: "feature",
+			content: new TextEncoder().encode("head only\n"),
+			size: 10,
+			binary: false,
+		}),
 		previewMerge: vi.fn().mockResolvedValue({
 			status: previewAfter,
 			mergeBaseSha: "sha_base",
@@ -87,7 +119,7 @@ beforeEach(() => {
 });
 
 describe("resolveHostedConflicts", () => {
-	it("commits the resolution on the tip it was computed from and records it", async () => {
+	it("commits the merged tree on a resolution branch cut from the base", async () => {
 		const { repo, git } = hosted("clean");
 
 		const result = await resolveHostedConflicts(
@@ -100,19 +132,32 @@ describe("resolveHostedConflicts", () => {
 		expect(result).toMatchObject({
 			ok: true,
 			sha: "sha_resolved",
+			branch: "bh/resolve/7-sha_feature",
 			agent: "test-agent",
 		});
+		expect(git.createBranch).toHaveBeenCalledWith(
+			repo.ref,
+			"bh/resolve/7-sha_feature",
+			"sha_main",
+		);
+		// The pull request's own changes come along, or the branch would revert them.
 		expect(git.commitFiles).toHaveBeenCalledWith(
 			repo.ref,
 			expect.objectContaining({
-				branch: "feature",
-				expectedHeadSha: "sha_feature",
+				branch: "bh/resolve/7-sha_feature",
+				expectedHeadSha: "sha_main",
+				files: [
+					{ path: "src/a.ts", content: "a\nb\n" },
+					{ path: "src/b.ts", content: "head only\n" },
+				],
 			}),
 		);
 		expect(prisma.pullRequest.update).toHaveBeenCalledWith(
 			expect.objectContaining({
 				data: expect.objectContaining({
-					headSha: "sha_resolved",
+					resolutionBranch: "bh/resolve/7-sha_feature",
+					resolutionSha: "sha_resolved",
+					resolutionBy: "test-agent",
 					events: {
 						create: expect.objectContaining({
 							kind: "conflict_resolved",
@@ -123,8 +168,8 @@ describe("resolveHostedConflicts", () => {
 		);
 	});
 
-	it("refuses a resolution the backend still cannot merge", async () => {
-		const { repo } = hosted("conflicted");
+	it("deletes the branch and records nothing when it still cannot merge", async () => {
+		const { repo, git } = hosted("conflicted");
 
 		const result = await resolveHostedConflicts(
 			repo,
@@ -137,6 +182,23 @@ describe("resolveHostedConflicts", () => {
 			ok: false,
 			error: expect.stringContaining("src/a.ts"),
 		});
+		expect(git.deleteBranch).toHaveBeenCalledWith(repo.ref, "bh/resolve/7-sha_feature");
+		expect(prisma.pullRequest.update).not.toHaveBeenCalled();
+	});
+
+	it("leaves no branch behind when the backend refuses the commit", async () => {
+		const { repo, git } = hosted("clean");
+		git.commitFiles.mockRejectedValue(new Error("expected head sha mismatch"));
+
+		const result = await resolveHostedConflicts(
+			repo,
+			actor,
+			7,
+			agent([{ path: "src/a.ts", content: "a\nb\n" }]),
+		);
+
+		expect(result).toEqual({ ok: false, error: "expected head sha mismatch" });
+		expect(git.deleteBranch).toHaveBeenCalledWith(repo.ref, "bh/resolve/7-sha_feature");
 	});
 
 	it("never commits output that skipped a file, invented one, or kept a marker", async () => {

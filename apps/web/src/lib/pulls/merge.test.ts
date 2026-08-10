@@ -207,6 +207,94 @@ describe("mergeHostedPull", () => {
 		expect(git.deleteBranch).not.toHaveBeenCalled();
 	});
 
+	it("lands a recorded resolution when the head branch itself conflicts", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+			preview: { status: "conflicted", conflicts: [{ path: "src/a.ts" }] },
+		});
+		vi.mocked(prisma.pullRequest.findFirst).mockResolvedValue(
+			pull({
+				resolutionBranch: "bh/resolve/7-sha_feature",
+				resolutionSha: "sha_resolved",
+				resolutionBy: "model",
+			}),
+		);
+		// The resolution branch is the one the backend calls clean.
+		git.previewMerge.mockImplementation(
+			async (_ref: unknown, _base: string, head: string) => ({
+				status:
+					head === "bh/resolve/7-sha_feature"
+						? "clean"
+						: "conflicted",
+				mergeBaseSha: "sha_base",
+				baseSha: "sha_main",
+				headSha: "sha_resolved",
+				conflicts:
+					head === "bh/resolve/7-sha_feature"
+						? []
+						: [{ path: "src/a.ts", content: null }],
+			}),
+		);
+
+		const result = await mergeHostedPull(repo, actor, { number: 7 });
+
+		expect(result).toMatchObject({ ok: true, sha: "sha_merged" });
+		expect(git.merge).toHaveBeenCalledWith(
+			repo.ref,
+			"main",
+			"bh/resolve/7-sha_feature",
+			expect.anything(),
+		);
+		// The throwaway branch does not outlive the merge it was made for.
+		expect(git.deleteBranch).toHaveBeenCalledWith(repo.ref, "bh/resolve/7-sha_feature");
+	});
+
+	it("drops a resolution made for an older head instead of merging it", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+			preview: { status: "conflicted", conflicts: [{ path: "src/a.ts" }] },
+		});
+		vi.mocked(prisma.pullRequest.findFirst).mockResolvedValue(
+			pull({
+				resolutionBranch: "bh/resolve/7-sha_older",
+				resolutionSha: "sha_resolved",
+				resolutionBy: "model",
+			}),
+		);
+
+		const result = await mergeHostedPull(repo, actor, { number: 7 });
+
+		expect(result).toMatchObject({ ok: false, conflicts: [{ path: "src/a.ts" }] });
+		expect(git.merge).not.toHaveBeenCalled();
+		expect(git.deleteBranch).toHaveBeenCalledWith(repo.ref, "bh/resolve/7-sha_older");
+		expect(prisma.pullRequest.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: {
+					resolutionBranch: null,
+					resolutionSha: null,
+					resolutionBy: null,
+				},
+			}),
+		);
+	});
+
+	it("refuses a rebase while the head is behind the base", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_moved", feature: "sha_feature" },
+		});
+
+		const result = await mergeHostedPull(repo, actor, {
+			number: 7,
+			strategy: "rebase",
+		});
+
+		expect(result).toMatchObject({
+			ok: false,
+			error: expect.stringContaining("update the branch"),
+		});
+		expect(git.merge).not.toHaveBeenCalled();
+	});
+
 	it("deletes the branch when nothing stacks on it", async () => {
 		const { repo, git } = hosted({
 			branches: { main: "sha_main", feature: "sha_feature" },

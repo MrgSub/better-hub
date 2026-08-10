@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import type { CompareResult, FileDiff } from "@/lib/git/types";
 import type { PRBundleData, PRPageResult, ReviewThread } from "@/lib/github";
 import type { HostedRepo } from "@/lib/repos/hosted-source";
+import { resolutionBranchName } from "./merge";
 
 /**
  * Pull requests we own, read back in the GitHub shapes `lib/github.ts` returns.
@@ -257,7 +258,18 @@ export async function hostedPull(h: HostedRepo, number: number) {
 async function hostedMergeable(h: HostedRepo, row: PullRequest): Promise<boolean | null> {
 	try {
 		const preview = await h.git.previewMerge(h.ref, row.baseBranch, row.headBranch);
-		return preview.status !== "conflicted";
+		if (preview.status !== "conflicted") return true;
+		// A conflict with a resolution recorded against the current head still
+		// merges: that branch is what lands.
+		if (row.resolutionBranch !== resolutionBranchName(row.number, row.headSha)) {
+			return false;
+		}
+		const resolved = await h.git.previewMerge(
+			h.ref,
+			row.baseBranch,
+			row.resolutionBranch,
+		);
+		return resolved.status !== "conflicted";
 	} catch {
 		return null;
 	}

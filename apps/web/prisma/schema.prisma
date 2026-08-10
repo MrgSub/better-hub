@@ -236,6 +236,14 @@ model PullRequest {
   deletions    Int     @default(0)
   changedFiles Int     @default(0)
 
+  /// A verified conflict resolution waiting for a human to merge it: a branch
+  /// off the base carrying the merged tree, so merging the pull request lands
+  /// that instead of a head branch the backend refuses.
+  resolutionBranch String?
+  resolutionSha    String?
+  /// Who produced it: an agent's name, or "manual".
+  resolutionBy     String?
+
   /// Stacks: the pull request whose head branch this one is based on.
   parentId String?
   /// Shared by every pull request in one stack, so it is a single query.

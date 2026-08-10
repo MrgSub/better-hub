@@ -101,7 +101,9 @@ export async function hostedConflicts(
 	headBranch: string,
 ): Promise<ConflictSet> {
 	const preview = await h.git.previewMerge(h.ref, baseBranch, headBranch);
-	const mergeBase = preview.mergeBaseSha ?? baseBranch;
+	// Unrelated histories have no merge base; the base tip is the only ancestor
+	// a three-way read can use, and a branch name here would not be a commit.
+	const mergeBase = preview.mergeBaseSha ?? preview.baseSha;
 	const diff = await h.git.compare(h.ref, baseBranch, headBranch);
 
 	const read: BlobReader = async (path, ref) => {

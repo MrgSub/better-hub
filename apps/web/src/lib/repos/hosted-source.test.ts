@@ -48,7 +48,7 @@ describe("hostedContents", () => {
 });
 
 describe("hostedFileContent", () => {
-	it("decodes text and leaves binary bodies empty", async () => {
+	it("decodes text and keeps binary control bytes for the viewer's sniff", async () => {
 		const text = await hostedFileContent(
 			repo({
 				getFileContent: vi.fn().mockResolvedValue({
@@ -75,12 +75,19 @@ describe("hostedFileContent", () => {
 			}),
 			"a.png",
 		);
-		expect(binary?.content).toBe("");
+		// eslint-disable-next-line no-control-regex
+		expect(binary?.content).toMatch(/[\x00-\x08]/);
 	});
 
 	it("is null for a path the backend does not have", async () => {
 		const hosted = repo({ getFileContent: vi.fn().mockResolvedValue(null) });
 		expect(await hostedFileContent(hosted, "nope.txt")).toBeNull();
+	});
+
+	it("is null for a directory rather than asking the backend", async () => {
+		const getFileContent = vi.fn();
+		expect(await hostedFileContent(repo({ getFileContent }), "")).toBeNull();
+		expect(getFileContent).not.toHaveBeenCalled();
 	});
 });
 

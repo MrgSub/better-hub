@@ -87,6 +87,10 @@ export async function hostedContents(h: HostedRepo, path: string, ref?: string) 
 }
 
 export async function hostedFileContent(h: HostedRepo, path: string, ref?: string) {
+	// A directory is not a file: GitHub answers 404, and the backends reject
+	// the empty path outright.
+	if (!path) return null;
+
 	const at = ref || h.defaultBranch;
 	const blob = await h.git.getFileContent(h.ref, path, at);
 	if (!blob) return null;
@@ -97,7 +101,9 @@ export async function hostedFileContent(h: HostedRepo, path: string, ref?: strin
 		size: blob.size,
 		type: "file" as const,
 		encoding: "utf-8",
-		content: blob.binary ? "" : new TextDecoder().decode(blob.content),
+		// Decoded even when binary, so the control bytes the viewer sniffs for
+		// survive and it shows a download instead of an empty file.
+		content: new TextDecoder().decode(blob.content),
 		url: "",
 		html_url: `/${h.ref.owner}/${h.ref.repo}/blob/${at}/${path}`,
 		git_url: "",

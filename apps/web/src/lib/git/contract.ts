@@ -281,5 +281,32 @@ export function runGitProviderContract(name: string, make: () => GitProvider): v
 				await git.deleteRepo(imported);
 			}
 		});
+
+		it("forks a repository it already hosts", async () => {
+			const forked: RepoRef = { owner: repo.owner, repo: `${repo.repo}-fork` };
+			try {
+				const info = await git.createRepo(forked, {
+					defaultBranch: "main",
+					forkOf: { repo, ref: "main" },
+				});
+				expect(info.name).toBe(forked.repo);
+
+				let names: string[] = [];
+				for (let i = 0; i < 20 && !names.includes("main"); i++) {
+					await new Promise((resolve) => setTimeout(resolve, 3000));
+					names = await git
+						.listBranches(forked)
+						.then((page) => page.items.map((b) => b.name))
+						.catch(() => []);
+				}
+				expect(names).toContain("main");
+
+				// A fork starts from the source's content, not an empty tree.
+				const file = await git.getFileContent(forked, "src/app.ts", "main");
+				expect(file).not.toBeNull();
+			} finally {
+				await git.deleteRepo(forked);
+			}
+		});
 	});
 }

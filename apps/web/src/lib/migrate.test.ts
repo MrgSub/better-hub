@@ -47,16 +47,20 @@ describe("buildAgentPrompt", () => {
 			defaultBranch: "master",
 			description: null,
 			sizeKb: 1,
+			ownerType: "User",
+			permission: "admin",
+			orgRole: null,
 		},
-		owner: "adam",
+		actor: { userId: "u1", login: "adam", token: "should-never-appear" },
 		name: "hello-world",
 		defaultBranch: "master",
-		token: "should-never-appear",
 	};
+	const target = { owner: "adam", repo: "hello-world" };
 
 	it("repoints origin and keeps github as a fallback remote", () => {
 		const prompt = buildAgentPrompt(
 			input,
+			target,
 			"https://t:short-lived@host/adam/hello-world.git",
 		);
 		expect(prompt).toContain(
@@ -69,6 +73,8 @@ describe("buildAgentPrompt", () => {
 	});
 
 	it("never leaks the user's github token", () => {
-		expect(buildAgentPrompt(input, "https://host/x.git")).not.toContain(input.token);
+		expect(buildAgentPrompt(input, target, "https://host/x.git")).not.toContain(
+			input.actor.token,
+		);
 	});
 });

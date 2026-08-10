@@ -1,18 +1,25 @@
 import { getServerSession } from "@/lib/auth";
 import { GitError } from "@/lib/git/types";
-import { grantAccessUrl, migrateRepository, parseRepoInput, resolveUpstream } from "@/lib/migrate";
+import {
+	grantAccessUrl,
+	migrateRepository,
+	parseRepoInput,
+	planImport,
+	resolveUpstream,
+} from "@/lib/migrate";
 
-async function githubCredentials() {
+async function actor() {
 	const session = await getServerSession();
 	const token = session?.githubUser?.accessToken;
 	const login = session?.githubUser?.login;
-	if (!token || typeof login !== "string") return null;
-	return { token, login };
+	const userId = session?.user?.id;
+	if (!token || typeof login !== "string" || !userId) return null;
+	return { token, login, userId };
 }
 
 /** Resolves a pasted repository reference against the user's own GitHub access. */
 export async function GET(request: Request) {
-	const credentials = await githubCredentials();
+	const credentials = await actor();
 	if (!credentials) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
 	const input = new URL(request.url).searchParams.get("repo") ?? "";
@@ -33,11 +40,14 @@ export async function GET(request: Request) {
 		});
 	}
 
-	return Response.json({ needsAccess: false, upstream, destinationOwner: credentials.login });
+	// Told up front, so the confirm step can say whose namespace this lands in
+	// and whether it will be a fork rather than surprising the user afterwards.
+	const plan = await planImport(upstream, credentials.login);
+	return Response.json({ needsAccess: false, upstream, plan });
 }
 
 export async function POST(request: Request) {
-	const credentials = await githubCredentials();
+	const credentials = await actor();
 	if (!credentials) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
 	const body = (await request.json()) as {
@@ -59,10 +69,9 @@ export async function POST(request: Request) {
 	try {
 		const result = await migrateRepository({
 			upstream,
-			owner: credentials.login,
+			actor: credentials,
 			name: body.name?.trim() || upstream.name,
 			defaultBranch: body.defaultBranch?.trim() || upstream.defaultBranch,
-			token: credentials.token,
 		});
 		return Response.json(result);
 	} catch (error) {

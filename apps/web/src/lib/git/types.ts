@@ -39,11 +39,20 @@ export interface UpstreamCredential {
 	password: string;
 }
 
+/** Another repository on the same backend, copied at a point in time. */
+export interface ForkSource {
+	repo: RepoRef;
+	/** Branch or tag to fork from; defaults to the source's default branch. */
+	ref?: string;
+}
+
 export interface CreateRepoInit {
 	defaultBranch?: string;
 	baseRepo?: UpstreamRef;
 	/** Required when `baseRepo.auth` is `token`. */
 	credential?: UpstreamCredential;
+	/** Mutually exclusive with `baseRepo`: copy a repo we already host. */
+	forkOf?: ForkSource;
 }
 
 export interface RepoGitInfo {

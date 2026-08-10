@@ -29,6 +29,7 @@ import { CodeStorageClient, repoId, toCodeStorageScopes } from "./client";
 import {
 	toBaseRepo,
 	toBlameHunks,
+	toForkBaseRepo,
 	toBranch,
 	toCommit,
 	toCommitDetail,
@@ -98,6 +99,15 @@ export class CodeStorageProvider implements GitProvider {
 
 	async createRepo(r: RepoRef, init?: CreateRepoInit): Promise<RepoGitInfo> {
 		const defaultBranch = init?.defaultBranch ?? "main";
+		const baseRepo = init?.forkOf
+			? toForkBaseRepo(
+					init.forkOf,
+					await this.client.signToken(["git:read"], init.forkOf.repo),
+					defaultBranch,
+				)
+			: init?.baseRepo
+				? toBaseRepo(init.baseRepo, defaultBranch)
+				: null;
 		const created = await this.client.json<{ repo_id: string }>("/repos", {
 			repo: r,
 			scopes: ["repo:write"],
@@ -105,9 +115,7 @@ export class CodeStorageProvider implements GitProvider {
 			contentType: "application/json",
 			body: JSON.stringify({
 				default_branch: defaultBranch,
-				...(init?.baseRepo
-					? { base_repo: toBaseRepo(init.baseRepo, defaultBranch) }
-					: {}),
+				...(baseRepo ? { base_repo: baseRepo } : {}),
 			}),
 		});
 

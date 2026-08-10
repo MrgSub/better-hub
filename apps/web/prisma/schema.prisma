@@ -24,6 +24,9 @@ model User {
   usageLogs    UsageLog[]
   aiCallLogs   AiCallLog[]
   creditLedger CreditLedger[]
+  organizations OrganizationMember[]
+  repositories  Repository[]
+  collaborations RepositoryCollaborator[]
 
   aiMessageCount Int       @default(0)
   lastActiveAt   DateTime?
@@ -109,6 +112,82 @@ model Subscription {
   stripeScheduleId     String?
 
   @@map("subscription")
+}
+
+/// A GitHub organization we mirror so its members inherit access to the
+/// repositories imported under it.
+model Organization {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  githubLogin String   @unique
+  createdAt   DateTime @default(now())
+
+  members      OrganizationMember[]
+  repositories Repository[]
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  organizationId String
+  userId         String
+  /// "admin" or "member", seeded from the caller's GitHub org role.
+  role           String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, userId])
+  @@index([userId])
+  @@map("organization_members")
+}
+
+/// A repository on our git plane. `upstream*` is set only on the canonical
+/// import of a GitHub repo, so the unique index below is what stops a second
+/// importer from creating a duplicate copy; forks point at `forkOf` instead.
+model Repository {
+  id             String   @id @default(cuid())
+  owner          String
+  name           String
+  defaultBranch  String
+  gitBackend     String
+  gitRepoId      String
+  upstreamHost   String?
+  upstreamOwner  String?
+  upstreamName   String?
+  forkOfId       String?
+  ownerUserId    String?
+  organizationId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  forkOf        Repository?              @relation("RepositoryForks", fields: [forkOfId], references: [id], onDelete: SetNull)
+  forks         Repository[]             @relation("RepositoryForks")
+  ownerUser     User?                    @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  organization  Organization?            @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  collaborators RepositoryCollaborator[]
+
+  @@unique([owner, name])
+  @@unique([upstreamHost, upstreamOwner, upstreamName])
+  @@index([ownerUserId])
+  @@index([organizationId])
+  @@map("repositories")
+}
+
+model RepositoryCollaborator {
+  repositoryId String
+  userId       String
+  /// "admin", "write" or "read", mapped from the upstream permission.
+  permission   String
+  createdAt    DateTime @default(now())
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([repositoryId, userId])
+  @@index([userId])
+  @@map("repository_collaborators")
 }
 
 model GithubCacheEntry {

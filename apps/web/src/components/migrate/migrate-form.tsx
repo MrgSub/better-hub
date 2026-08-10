@@ -14,11 +14,34 @@ interface Upstream {
 	sizeKb: number;
 }
 
+/** What the server will do with this upstream, decided before we import. */
+interface Plan {
+	decision: { kind: "create" | "join" | "fork" };
+	destinationOwner: string;
+	existing: { owner: string; name: string } | null;
+}
+
 interface Migrated {
+	outcome: Plan["decision"]["kind"];
 	repo: { owner: string; name: string; defaultBranch: string };
 	cloneUrl: string;
 	agentPrompt: string;
 }
+
+const planCopy: Record<Plan["decision"]["kind"], { note: string; action: string }> = {
+	create: {
+		note: "",
+		action: "Migrate to Better Hub",
+	},
+	join: {
+		note: "Someone already migrated this repository. You have write access on GitHub, so you'll be added to the existing one instead of copying it again.",
+		action: "Join this repository",
+	},
+	fork: {
+		note: "You can read this repository but not write to it, so it lands in your own namespace as a fork.",
+		action: "Fork to your account",
+	},
+};
 
 type Step = "input" | "confirm" | "migrating" | "done";
 
@@ -54,10 +77,14 @@ export function MigrateForm() {
 	const [grantUrl, setGrantUrl] = useState<string | null>(null);
 
 	const [upstream, setUpstream] = useState<Upstream | null>(null);
+	const [plan, setPlan] = useState<Plan | null>(null);
 	const [destinationOwner, setDestinationOwner] = useState("");
 	const [name, setName] = useState("");
 	const [defaultBranch, setDefaultBranch] = useState("");
 	const [result, setResult] = useState<Migrated | null>(null);
+
+	const kind = plan?.decision.kind ?? "create";
+	const joining = kind === "join";
 
 	async function resolve() {
 		setBusy(true);
@@ -78,8 +105,9 @@ export function MigrateForm() {
 				return;
 			}
 			setUpstream(data.upstream);
-			setDestinationOwner(data.destinationOwner);
-			setName(data.upstream.name);
+			setPlan(data.plan);
+			setDestinationOwner(data.plan.destinationOwner);
+			setName(data.plan.existing?.name ?? data.upstream.name);
 			setDefaultBranch(data.upstream.defaultBranch);
 			setStep("confirm");
 		} catch {
@@ -207,6 +235,9 @@ export function MigrateForm() {
 												value={
 													name
 												}
+												disabled={
+													joining
+												}
 												onChange={(
 													e,
 												) =>
@@ -237,6 +268,9 @@ export function MigrateForm() {
 											value={
 												defaultBranch
 											}
+											disabled={
+												joining
+											}
 											onChange={(
 												e,
 											) =>
@@ -255,6 +289,15 @@ export function MigrateForm() {
 										</p>
 									</div>
 								</div>
+								{planCopy[kind].note && (
+									<p className="px-3 py-2.5 text-[11px] text-muted-foreground">
+										{
+											planCopy[
+												kind
+											].note
+										}
+									</p>
+								)}
 							</div>
 						)}
 
@@ -292,7 +335,7 @@ export function MigrateForm() {
 								}
 								onClick={() => void migrate()}
 							>
-								Migrate to Better Hub
+								{planCopy[kind].action}
 							</Button>
 						) : (
 							<Button
@@ -313,8 +356,9 @@ export function MigrateForm() {
 						<div className="h-9 rounded-md bg-muted/50 animate-pulse" />
 						<div className="h-24 rounded-md bg-muted/50 animate-pulse" />
 						<p className="text-xs text-muted-foreground">
-							Importing history from GitHub. Large
-							repositories take a moment.
+							{joining
+								? "Adding you to the existing repository."
+								: "Importing history from GitHub. Large repositories take a moment."}
 						</p>
 					</div>
 				)}
@@ -327,6 +371,13 @@ export function MigrateForm() {
 								{result.repo.owner}/
 								{result.repo.name}
 							</span>
+							{result.outcome !== "create" && (
+								<span className="text-[10px] font-mono text-muted-foreground">
+									{result.outcome === "join"
+										? "joined"
+										: "fork"}
+								</span>
+							)}
 							<span className="ml-auto text-[10px] font-mono text-muted-foreground/60">
 								default {result.repo.defaultBranch}
 							</span>

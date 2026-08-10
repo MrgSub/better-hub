@@ -6,6 +6,7 @@ import type {
 	DiffStats,
 	FileChangeStatus,
 	FileDiff,
+	ForkSource,
 	GrepMatch,
 	MergeConflict,
 	MergeStatus,
@@ -177,6 +178,26 @@ export function toBaseRepo(upstream: UpstreamRef, fallbackBranch: string): Recor
 		upstream.auth !== "installation"
 			? { auth: { auth_type: "public" } }
 			: {}),
+	};
+}
+
+/**
+ * Forks are the same endpoint with `operation: fork`, addressed by the source
+ * repo's own coordinates and authorised by a read token for it.
+ */
+export function toForkBaseRepo(
+	source: ForkSource,
+	readToken: string,
+	fallbackBranch: string,
+): Record<string, unknown> {
+	return {
+		provider: "code.storage",
+		owner: source.repo.owner,
+		name: `${source.repo.owner}/${source.repo.repo}`,
+		default_branch: fallbackBranch,
+		operation: "fork",
+		...(source.ref ? { ref: source.ref } : {}),
+		auth: { auth_type: "jwt", token: readToken },
 	};
 }
 

@@ -12,10 +12,14 @@ import {
 	GitMerge,
 	X,
 	Keyboard,
+	Sparkles,
 } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import type { MergeHunk, ConflictFileData } from "@/lib/three-way-merge";
-import { commitMergeConflictResolution } from "@/app/(app)/repos/[owner]/[repo]/pulls/pr-actions";
+import {
+	commitMergeConflictResolution,
+	resolvePRConflictsAutomatically,
+} from "@/app/(app)/repos/[owner]/[repo]/pulls/pr-actions";
 import { useMutationEvents } from "@/components/shared/mutation-event-provider";
 import { highlightCodeClient } from "@/lib/shiki-client";
 import { useColorTheme } from "@/components/theme/theme-provider";
@@ -171,6 +175,8 @@ interface PRConflictResolverProps {
 	headBranch: string;
 	headRepoOwner?: string | null;
 	headRepoName?: string | null;
+	/** Repositories we host can resolve without a human picking hunks. */
+	canResolveAutomatically?: boolean;
 }
 
 // ── Component ───────────────────────────────────────────────────
@@ -183,6 +189,7 @@ export function PRConflictResolver({
 	headBranch,
 	headRepoOwner,
 	headRepoName,
+	canResolveAutomatically,
 }: PRConflictResolverProps) {
 	const router = useRouter();
 	const { emit } = useMutationEvents();
@@ -506,6 +513,29 @@ export function PRConflictResolver({
 		});
 	};
 
+	/**
+	 * Hands the whole set to an agent instead of picking hunks. It commits to
+	 * the head branch, so the outcome is reviewed like any other push.
+	 */
+	const resolveAutomatically = () => {
+		startTransition(async () => {
+			const result = await resolvePRConflictsAutomatically(
+				owner,
+				repo,
+				pullNumber,
+			);
+			if (result.error) {
+				setCommitResult({ type: "error", message: result.error });
+				return;
+			}
+			setCommitResult({ type: "success", message: "Conflicts resolved!" });
+			emit({ type: "pr:conflict-resolved", owner, repo, number: pullNumber });
+			setTimeout(() => {
+				window.location.href = `/${owner}/${repo}/pulls/${pullNumber}`;
+			}, 1200);
+		});
+	};
+
 	// ── Loading / Error states ─────────────────────────────────
 
 	if (loading) {
@@ -578,6 +608,17 @@ export function PRConflictResolver({
 					)}
 				</div>
 				<div className="flex items-center gap-2">
+					{canResolveAutomatically && (
+						<button
+							onClick={resolveAutomatically}
+							disabled={isPending}
+							className="flex items-center gap-1 px-2 py-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+							title="Let an agent resolve these conflicts, then review the commit"
+						>
+							<Sparkles className="w-3 h-3" />
+							Resolve automatically
+						</button>
+					)}
 					<button
 						onClick={() => setShowShortcuts((s) => !s)}
 						className="flex items-center gap-1 px-2 py-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors cursor-pointer"

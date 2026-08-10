@@ -42,6 +42,7 @@ import { TrackView } from "@/components/shared/track-view";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { reportContentViewed } from "@/lib/inngest";
+import { hostedRepo } from "@/lib/repos/hosted-source";
 import { isItemPinned } from "@/lib/pinned-items-store";
 import { all } from "better-all";
 
@@ -383,6 +384,9 @@ export default async function PRDetailPage({
 	const highlightData = await highlightPromise;
 
 	const showConflictResolver = sp.resolve === "conflicts" && isOpen;
+	// Only a pull request we own can be resolved by an agent: it needs to commit
+	// through our git backend.
+	const isHosted = showConflictResolver && !!(await hostedRepo(owner, repo));
 	const headSha = pr.head.sha;
 	const headBranch = pr.head.ref;
 	const baseSha = pr.base.sha;
@@ -448,6 +452,7 @@ export default async function PRDetailPage({
 							headBranch={pr.head.ref}
 							headRepoOwner={pr.head_repo_owner}
 							headRepoName={pr.head_repo_name}
+							canResolveAutomatically={isHosted}
 						/>
 					) : undefined
 				}

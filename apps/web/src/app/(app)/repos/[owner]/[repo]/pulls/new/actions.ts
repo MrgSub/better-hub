@@ -1,7 +1,7 @@
 "use server";
 
-import { getServerSession } from "@/lib/auth";
 import { getOctokit, invalidateRepoPullRequestsCache } from "@/lib/github";
+import { hostedPullActor } from "@/lib/pulls/actor";
 import { createHostedPull } from "@/lib/pulls/create";
 import { hostedCompare } from "@/lib/pulls/hosted-source";
 import { hostedBranches, hostedRepo, type HostedRepo } from "@/lib/repos/hosted-source";
@@ -104,23 +104,16 @@ export async function createPullRequest(
 ): Promise<{ success: boolean; number?: number; error?: string }> {
 	const hosted = await hostedRepo(owner, repo);
 	if (hosted) {
-		const session = await getServerSession();
-		const userId = session?.user?.id;
-		if (!userId) return { success: false, error: "Not authenticated" };
+		const actor = await hostedPullActor();
+		if (!actor) return { success: false, error: "Not authenticated" };
 
-		const result = await createHostedPull(
-			hosted,
-			{
-				userId,
-				login: (session.githubUser?.login as string | undefined) ?? null,
-				name: session.user.name ?? null,
-				avatarUrl:
-					(session.githubUser?.avatar_url as string | undefined) ??
-					session.user.image ??
-					null,
-			},
-			{ title, body, head, base, draft },
-		);
+		const result = await createHostedPull(hosted, actor, {
+			title,
+			body,
+			head,
+			base,
+			draft,
+		});
 		if (!result.ok) return { success: false, error: result.error };
 
 		invalidateRepoCache(owner, repo);

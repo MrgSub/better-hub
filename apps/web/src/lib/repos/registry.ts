@@ -36,6 +36,33 @@ export function findCanonicalRepository(upstream: UpstreamIdentity): Promise<Rep
 	});
 }
 
+/**
+ * Every repository the user can reach here: theirs, ones they collaborate on,
+ * and ones owned by an organization they belong to. Newest activity first.
+ */
+export function listUserRepositories(userId: string): Promise<Repository[]> {
+	return prisma.repository.findMany({
+		where: {
+			OR: [
+				{ ownerUserId: userId },
+				{ collaborators: { some: { userId } } },
+				{ organization: { members: { some: { userId } } } },
+			],
+		},
+		orderBy: { updatedAt: "desc" },
+	});
+}
+
+/** Looks a repository up by its Better Hub coordinates, case-insensitively. */
+export function findRepository(owner: string, name: string): Promise<Repository | null> {
+	return prisma.repository.findFirst({
+		where: {
+			owner: { equals: owner, mode: "insensitive" },
+			name: { equals: name, mode: "insensitive" },
+		},
+	});
+}
+
 export interface RecordRepositoryInput {
 	repo: RepoGitInfo;
 	backend: string;

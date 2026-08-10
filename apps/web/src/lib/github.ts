@@ -19,6 +19,15 @@ import {
 import { redis } from "./redis";
 import { computeContributorScore } from "./contributor-score";
 import { getCachedAuthorDossier, setCachedAuthorDossier } from "./repo-data-cache";
+import {
+	hostedBranches,
+	hostedCommits,
+	hostedContents,
+	hostedFileContent,
+	hostedRepo,
+	hostedTags,
+	hostedTree,
+} from "./repos/hosted-source";
 
 export type RepoPermissions = {
 	admin: boolean;
@@ -124,6 +133,16 @@ const SHAREABLE_CACHE_TYPES: ReadonlySet<string> = new Set([
 	"org_members",
 	"trending_repos",
 ]);
+
+/**
+ * Hosted repositories answer code reads from their own git backend. The
+ * payloads carry every field the pages read, but not octokit's REST ceremony
+ * (node ids, api urls), so the shape is asserted here once instead of making
+ * each page branch on where the repository lives.
+ */
+function asGitHubShape<T>(value: unknown): T {
+	return value as T;
+}
 
 function isShareableCacheType(jobType: string): boolean {
 	return SHAREABLE_CACHE_TYPES.has(jobType);
@@ -2789,6 +2808,13 @@ export async function checkIsStarred(owner: string, repo: string): Promise<boole
 }
 
 export async function getRepoContents(owner: string, repo: string, path: string, ref?: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoContentsFromGitHub>>>(
+			await hostedContents(hosted, path, ref),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	const normalizedRef = normalizeRef(ref);
 	const cacheKey = buildRepoContentsCacheKey(owner, repo, path, normalizedRef);
@@ -2817,8 +2843,15 @@ export async function getRepoTree(
 	treeSha: string,
 	recursive?: boolean,
 ) {
-	const authCtx = await getGitHubAuthContext();
 	const recursiveFlag = recursive === true;
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoTreeFromGitHub>>>(
+			await hostedTree(hosted, treeSha, recursiveFlag),
+		);
+	}
+
+	const authCtx = await getGitHubAuthContext();
 	const cacheKey = buildRepoTreeCacheKey(owner, repo, treeSha, recursiveFlag);
 
 	return readLocalFirstGitData({
@@ -2834,6 +2867,13 @@ export async function getRepoTree(
 }
 
 export async function getRepoBranches(owner: string, repo: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoBranchesFromGitHub>>>(
+			await hostedBranches(hosted),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	const cacheKey = buildRepoBranchesCacheKey(owner, repo);
 
@@ -2849,6 +2889,13 @@ export async function getRepoBranches(owner: string, repo: string) {
 }
 
 export async function getRepoTags(owner: string, repo: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoTagsFromGitHub>>>(
+			await hostedTags(hosted),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	const cacheKey = buildRepoTagsCacheKey(owner, repo);
 
@@ -2942,6 +2989,13 @@ export async function getLatestRepoRelease(owner: string, repo: string) {
 }
 
 export async function getFileContent(owner: string, repo: string, path: string, ref?: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchFileContentFromGitHub>>>(
+			await hostedFileContent(hosted, path, ref),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	const normalizedRef = normalizeRef(ref);
 	const cacheKey = buildFileContentCacheKey(owner, repo, path, normalizedRef);
@@ -7162,6 +7216,13 @@ export async function getRepoCommits(
 	since?: string,
 	until?: string,
 ) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<Octokit["repos"]["listCommits"]>>["data"]>(
+			await hostedCommits(hosted, sha, page, perPage),
+		);
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return [];
 	try {

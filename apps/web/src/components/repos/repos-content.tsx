@@ -27,7 +27,8 @@ import { getLanguageColor } from "@/lib/github-utils";
 import { TimeAgo } from "@/components/ui/time-ago";
 
 interface Repo {
-	id: number;
+	/** GitHub numbers its repositories; ours are keyed by their Better Hub id. */
+	id: number | string;
 	name: string;
 	full_name: string;
 	description: string | null;

@@ -6,6 +6,7 @@ import type {
 	CommitPatchInput,
 	CommitSummary,
 	CompareResult,
+	CreateRepoInit,
 	FileBlob,
 	FileDiff,
 	GitScope,
@@ -20,7 +21,6 @@ import type {
 	TagRef,
 	TreeEntry,
 	TreeEntryWithCommit,
-	UpstreamRef,
 } from "./types";
 
 /**
@@ -36,10 +36,7 @@ export interface GitProvider {
 
 	getRepo(r: RepoRef): Promise<RepoGitInfo | null>;
 	listRepos(q?: string, cursor?: string): Promise<Page<RepoGitInfo>>;
-	createRepo(
-		r: RepoRef,
-		init?: { defaultBranch?: string; baseRepo?: UpstreamRef },
-	): Promise<RepoGitInfo>;
+	createRepo(r: RepoRef, init?: CreateRepoInit): Promise<RepoGitInfo>;
 	deleteRepo(r: RepoRef): Promise<void>;
 
 	listBranches(r: RepoRef, cursor?: string): Promise<Page<BranchRef>>;

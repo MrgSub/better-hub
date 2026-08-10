@@ -20,6 +20,7 @@ import {
 	CircleDot,
 	Archive,
 	ChevronDown,
+	Import,
 } from "lucide-react";
 import { cn, formatNumber } from "@/lib/utils";
 import { getLanguageColor } from "@/lib/github-utils";
@@ -311,6 +312,13 @@ export function ReposContent({
 					{filtered.length}
 					{filtered.length !== repos.length && ` / ${repos.length}`}
 				</span>
+				<Link
+					href="/migrate"
+					className="ml-auto flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-mono border border-border rounded-md text-muted-foreground/70 hover:bg-muted/50 dark:hover:bg-white/4 transition-colors"
+				>
+					<Import className="w-3 h-3" />
+					Migrate a repo
+				</Link>
 			</div>
 
 			{/* Toolbar */}

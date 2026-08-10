@@ -151,6 +151,35 @@ function toUpstream(base: WireRepo["base_repo"]): UpstreamRef | null {
 	};
 }
 
+/**
+ * Code Storage reads a GitHub upstream through its own GitHub App, which 412s
+ * unless that App is installed on the upstream. Public repos opt out with
+ * `auth_type: public`; private ones are synced as a generic HTTPS upstream on
+ * `github.com` instead, authenticated by a credential we store per repo.
+ */
+export function toBaseRepo(upstream: UpstreamRef, fallbackBranch: string): Record<string, unknown> {
+	const credentialed = upstream.auth === "token";
+	const generic = credentialed || upstream.provider === "generic";
+	return {
+		provider: credentialed ? "gitea" : upstream.provider,
+		owner: upstream.owner,
+		name: upstream.name,
+		default_branch: upstream.defaultBranch ?? fallbackBranch,
+		...(generic
+			? {
+					upstream_host: upstream.url
+						? new URL(upstream.url).host
+						: "github.com",
+				}
+			: {}),
+		...(upstream.provider === "github" &&
+		!credentialed &&
+		upstream.auth !== "installation"
+			? { auth: { auth_type: "public" } }
+			: {}),
+	};
+}
+
 export function toRepo(wire: WireRepo): RepoGitInfo {
 	const [owner = "", ...rest] = wire.url.split("/");
 	return {

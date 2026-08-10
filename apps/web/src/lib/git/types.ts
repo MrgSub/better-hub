@@ -26,10 +26,24 @@ export interface UpstreamRef {
 	/** Upstream branch to track; defaults to the new repo's default branch. */
 	defaultBranch?: string;
 	/**
-	 * How the backend reads the upstream: anonymously, or through the GitHub
-	 * App installation (required for private repositories). Defaults to public.
+	 * How the backend reads the upstream: anonymously, with a credential the
+	 * caller supplies, or through the GitHub App installation. Defaults to
+	 * public; private repositories need `token` or `installation`.
 	 */
-	auth?: "public" | "installation";
+	auth?: "public" | "token" | "installation";
+}
+
+/** HTTPS credential the backend uses to read a private upstream. */
+export interface UpstreamCredential {
+	username?: string;
+	password: string;
+}
+
+export interface CreateRepoInit {
+	defaultBranch?: string;
+	baseRepo?: UpstreamRef;
+	/** Required when `baseRepo.auth` is `token`. */
+	credential?: UpstreamCredential;
 }
 
 export interface RepoGitInfo {

@@ -7,6 +7,7 @@ import {
 	type CommitPatchInput,
 	type CommitSummary,
 	type CompareResult,
+	type CreateRepoInit,
 	type FileBlob,
 	type FileDiff,
 	GitError,
@@ -26,6 +27,7 @@ import {
 } from "../types";
 import { CodeStorageClient, repoId, toCodeStorageScopes } from "./client";
 import {
+	toBaseRepo,
 	toBlameHunks,
 	toBranch,
 	toCommit,
@@ -94,12 +96,9 @@ export class CodeStorageProvider implements GitProvider {
 		return toPage(wire, wire?.repos, toRepo);
 	}
 
-	async createRepo(
-		r: RepoRef,
-		init?: { defaultBranch?: string; baseRepo?: UpstreamRef },
-	): Promise<RepoGitInfo> {
+	async createRepo(r: RepoRef, init?: CreateRepoInit): Promise<RepoGitInfo> {
 		const defaultBranch = init?.defaultBranch ?? "main";
-		await this.client.json<{ repo_id: string }>("/repos", {
+		const created = await this.client.json<{ repo_id: string }>("/repos", {
 			repo: r,
 			scopes: ["repo:write"],
 			method: "POST",
@@ -107,56 +106,51 @@ export class CodeStorageProvider implements GitProvider {
 			body: JSON.stringify({
 				default_branch: defaultBranch,
 				...(init?.baseRepo
-					? {
-							base_repo: {
-								provider: init.baseRepo.provider,
-								owner: init.baseRepo.owner,
-								name: init.baseRepo.name,
-								default_branch:
-									init.baseRepo
-										.defaultBranch ??
-									defaultBranch,
-								// GitHub sync otherwise goes through Code Storage's GitHub
-								// App, which 412s unless it is installed on the upstream.
-								...(init.baseRepo.provider ===
-									"github" &&
-								init.baseRepo.auth !==
-									"installation"
-									? {
-											auth: {
-												auth_type: "public",
-											},
-										}
-									: {}),
-								// Self-hosted providers are addressed by host, not by name.
-								...(init.baseRepo.url &&
-								init.baseRepo.provider === "generic"
-									? {
-											upstream_host:
-												new URL(
-													init
-														.baseRepo
-														.url,
-												)
-													.host,
-										}
-									: {}),
-							},
-						}
+					? { base_repo: toBaseRepo(init.baseRepo, defaultBranch) }
 					: {}),
 			}),
 		});
-		const created = await this.getRepo(r);
-		if (created) return created;
+
+		// A credentialed upstream is configured but not cloned by create: the
+		// credential can only be stored once the repo exists, so the first
+		// fetch has to be triggered afterwards.
+		if (init?.baseRepo && init.credential) {
+			await this.client.json("/repos/git-credentials", {
+				repo: r,
+				scopes: ["repo:write"],
+				method: "POST",
+				contentType: "application/json",
+				body: JSON.stringify({
+					repo_id: created?.repo_id,
+					username: init.credential.username ?? "x-access-token",
+					password: init.credential.password,
+				}),
+			});
+			await this.pullUpstream(r);
+		}
+
+		const info = await this.getRepo(r);
+		if (info) return info;
 		// The repo exists (create returned 201) but the read raced its indexing.
 		return {
-			id: repoId(r),
+			id: created?.repo_id ?? repoId(r),
 			owner: r.owner,
 			name: r.repo,
 			defaultBranch,
 			createdAt: new Date().toISOString(),
 			upstream: init?.baseRepo ?? null,
 		};
+	}
+
+	/** Re-fetches a sync-backed repository from its upstream. */
+	async pullUpstream(r: RepoRef): Promise<void> {
+		await this.client.json("/repos/pull-upstream", {
+			repo: r,
+			scopes: ["git:write"],
+			method: "POST",
+			contentType: "application/json",
+			body: JSON.stringify({}),
+		});
 	}
 
 	async deleteRepo(r: RepoRef): Promise<void> {

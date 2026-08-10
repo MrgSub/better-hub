@@ -98,8 +98,15 @@ function errorMessage(status: number, body: string): string {
 				detail?: unknown;
 				error?: unknown;
 				title?: unknown;
+				// Commit endpoints answer with their own result envelope.
+				result?: { message?: unknown };
 			};
-			for (const field of [problem.detail, problem.error, problem.title]) {
+			for (const field of [
+				problem.detail,
+				problem.error,
+				problem.title,
+				problem.result?.message,
+			]) {
 				if (typeof field === "string" && field.length > 0) return field;
 			}
 		}

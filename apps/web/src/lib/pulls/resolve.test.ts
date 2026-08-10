@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PullRequest, Repository } from "@/generated/prisma/client";
 import type { GitProvider } from "@/lib/git/provider";
+import { GitError } from "@/lib/git/types";
 import type { HostedRepo } from "@/lib/repos/hosted-source";
 
 vi.mock("@/lib/db", () => ({
@@ -200,6 +201,31 @@ describe("resolveHostedConflicts", () => {
 
 		expect(result).toEqual({ ok: false, error: "expected head sha mismatch" });
 		expect(git.deleteBranch).toHaveBeenCalledWith(repo.ref, "bh/resolve/7-sha_feature");
+	});
+
+	it("explains a base that moved instead of forwarding the backend's ref comparison", async () => {
+		const { repo, git } = hosted("clean");
+		git.commitFiles.mockRejectedValue(
+			new GitError(
+				"conflict",
+				'{"commit":null,"result":{"status":"conflict","message":"base_ref (sha_main) does not match current head (sha_other)"}}',
+				409,
+			),
+		);
+
+		const result = await resolveHostedConflicts(
+			repo,
+			actor,
+			7,
+			agent([{ path: "src/a.ts", content: "a\nb\n" }]),
+		);
+
+		expect(result).toEqual({
+			ok: false,
+			error: "The base branch moved — reload the conflicts and resolve again.",
+		});
+		expect(git.deleteBranch).toHaveBeenCalledWith(repo.ref, "bh/resolve/7-sha_feature");
+		expect(prisma.pullRequest.update).not.toHaveBeenCalled();
 	});
 
 	it("never commits output that skipped a file, invented one, or kept a marker", async () => {

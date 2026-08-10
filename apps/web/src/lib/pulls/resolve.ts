@@ -2,7 +2,7 @@ import { generateText } from "ai";
 import type { PullRequest } from "@/generated/prisma/client";
 import { getInternalModel } from "@/lib/billing/ai-models.server";
 import { prisma } from "@/lib/db";
-import type { CommitFileChange } from "@/lib/git/types";
+import { GitError, type CommitFileChange } from "@/lib/git/types";
 import type { HostedRepo } from "@/lib/repos/hosted-source";
 import { repositoryPermission } from "@/lib/repos/registry";
 import type { ConflictFileData, MergeHunk } from "@/lib/three-way-merge";
@@ -273,6 +273,18 @@ async function mergedTree(
 	return files;
 }
 
+/**
+ * The backend refuses the commit when the base moved since the conflicts were
+ * computed, and says so in its own vocabulary. Reloading is the only cure, so
+ * say that instead of forwarding a ref comparison.
+ */
+function commitError(error: unknown): string {
+	if (error instanceof GitError && error.code === "conflict") {
+		return "The base branch moved — reload the conflicts and resolve again.";
+	}
+	return (error as Error).message;
+}
+
 async function land(
 	h: HostedRepo,
 	actor: PullAuthor,
@@ -360,7 +372,7 @@ async function land(
 	} catch (error) {
 		// Never leave a half-written resolution branch behind for a merge to find.
 		await h.git.deleteBranch(h.ref, branch).catch(() => {});
-		return { ok: false, error: (error as Error).message };
+		return { ok: false, error: commitError(error) };
 	}
 }
 

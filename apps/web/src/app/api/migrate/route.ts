@@ -66,10 +66,16 @@ export async function POST(request: Request) {
 		});
 		return Response.json(result);
 	} catch (error) {
+		// A conflict is about the user's own input; anything else is a backend
+		// or configuration failure whose message would leak our internals.
 		if (error instanceof GitError) {
+			if (error.code === "conflict") {
+				return Response.json({ error: error.message }, { status: 409 });
+			}
+			console.error("migration failed", error);
 			return Response.json(
-				{ error: error.message },
-				{ status: error.code === "conflict" ? 409 : 502 },
+				{ error: "Migration failed. Please try again." },
+				{ status: 502 },
 			);
 		}
 		throw error;

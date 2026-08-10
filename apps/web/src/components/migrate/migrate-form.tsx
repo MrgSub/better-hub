@@ -115,7 +115,7 @@ export function MigrateForm() {
 
 	return (
 		<div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
-			<div className="max-w-2xl w-full mx-auto py-6">
+			<div className="max-w-2xl w-full mx-auto px-4 sm:px-0 py-6">
 				<Link
 					href="/repos"
 					className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-4"

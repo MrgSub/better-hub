@@ -4,6 +4,7 @@ import { getOctokit, getGitHubToken } from "@/lib/github";
 import { renderMarkdownToHtml } from "@/components/shared/markdown-renderer";
 import { setCachedReadmeHtml } from "@/lib/readme-cache";
 import { hostedReadme, hostedRepo } from "@/lib/repos/hosted-source";
+import { parseLanguages } from "@/lib/repos/upstream-metadata";
 import {
 	setCachedRepoLanguages,
 	setCachedContributorAvatars,
@@ -58,12 +59,20 @@ export async function revalidateLanguages(
 	owner: string,
 	repo: string,
 ): Promise<Record<string, number> | null> {
+	const hosted = await hostedRepo(owner, repo);
+	const languages = hosted ? parseLanguages(hosted.record) : await readLanguages(owner, repo);
+	if (!languages) return null;
+
+	await setCachedRepoLanguages(owner, repo, languages);
+	return languages;
+}
+
+async function readLanguages(owner: string, repo: string): Promise<Record<string, number> | null> {
 	const octokit = await getOctokit();
 	if (!octokit) return null;
 
 	try {
 		const { data } = await octokit.repos.listLanguages({ owner, repo });
-		await setCachedRepoLanguages(owner, repo, data);
 		return data;
 	} catch {
 		return null;

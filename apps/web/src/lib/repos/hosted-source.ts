@@ -9,9 +9,10 @@ import type { RepoPageData } from "@/lib/github";
 import type { UpstreamPermission } from "./policy";
 import { findRepository, repositoryPermission } from "./registry";
 import {
+	cachedUpstreamStarred,
 	isMetadataStale,
 	parseLanguages,
-	readUpstreamStarred,
+	setUpstreamStarred,
 	syncUpstreamMetadata,
 	upstreamCoordinates,
 } from "./upstream-metadata";
@@ -154,7 +155,7 @@ export async function hostedPageData(
 
 	const [permission, starred] = await Promise.all([
 		repositoryPermission(h.record, viewer.userId),
-		viewer.token ? readUpstreamStarred(h.record, viewer.token) : false,
+		viewer.token ? cachedUpstreamStarred(h.record, viewer.userId, viewer.token) : false,
 	]);
 	const [repoData, latestCommit] = await Promise.all([
 		hostedRepoData(h, permission),
@@ -189,14 +190,25 @@ export async function githubCoordinates(owner: string, repo: string): Promise<Re
 	return upstream ? { owner: upstream.owner, repo: upstream.repo } : { owner, repo };
 }
 
-/** Forces the next page load to re-copy the upstream's read-only data. */
-export async function expireUpstreamMetadata(owner: string, repo: string): Promise<void> {
+/**
+ * Records a star the user just made against the upstream and forces the next
+ * page load to re-copy the counts it changed.
+ */
+export async function recordUpstreamStar(
+	owner: string,
+	repo: string,
+	userId: string,
+	starred: boolean,
+): Promise<void> {
 	const hosted = await hostedRepo(owner, repo);
 	if (!hosted) return;
-	await prisma.repository.update({
-		where: { id: hosted.record.id },
-		data: { metadataSyncedAt: null },
-	});
+	await Promise.all([
+		setUpstreamStarred(hosted.record, userId, starred),
+		prisma.repository.update({
+			where: { id: hosted.record.id },
+			data: { metadataSyncedAt: null },
+		}),
+	]);
 }
 
 /** First README-ish file at the root, read through the backend. */

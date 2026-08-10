@@ -1,6 +1,8 @@
 import { Octokit } from "@octokit/rest";
+import { waitUntil } from "@vercel/functions";
 import type { Repository } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { redis } from "@/lib/redis";
 
 /**
  * Read-only data GitHub still owns for an imported repository — stars,
@@ -10,6 +12,7 @@ import { prisma } from "@/lib/db";
  */
 
 const REFRESH_AFTER_MS = 60 * 60 * 1000;
+const STARRED_TTL_SECONDS = 60 * 60;
 
 export interface UpstreamCoordinates {
 	owner: string;
@@ -85,10 +88,12 @@ export async function syncUpstreamMetadata(
 	}
 }
 
+function starredKey(userId: string, upstream: UpstreamCoordinates): string {
+	return `gh:starred:${userId}:${upstream.owner}/${upstream.repo}`;
+}
+
 /** Whether the viewer starred the upstream; false when GitHub can't say. */
-export async function readUpstreamStarred(record: Repository, token: string): Promise<boolean> {
-	const upstream = upstreamCoordinates(record);
-	if (!upstream) return false;
+async function readUpstreamStarred(upstream: UpstreamCoordinates, token: string): Promise<boolean> {
 	try {
 		await new Octokit({ auth: token }).activity.checkRepoIsStarredByAuthenticatedUser({
 			...upstream,
@@ -97,4 +102,39 @@ export async function readUpstreamStarred(record: Repository, token: string): Pr
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * The viewer's star, from cache. A miss answers false and refreshes in the
+ * background, so rendering a hosted page never waits on GitHub.
+ */
+export async function cachedUpstreamStarred(
+	record: Repository,
+	userId: string | null,
+	token: string,
+): Promise<boolean> {
+	const upstream = upstreamCoordinates(record);
+	if (!upstream || !userId) return false;
+
+	const key = starredKey(userId, upstream);
+	const cached = await redis.get<number>(key).catch(() => null);
+	if (cached !== null && cached !== undefined) return cached === 1;
+
+	waitUntil(
+		readUpstreamStarred(upstream, token).then((starred) =>
+			redis.set(key, starred ? 1 : 0, { ex: STARRED_TTL_SECONDS }),
+		),
+	);
+	return false;
+}
+
+/** Records the star the user just made, so the next render agrees with them. */
+export async function setUpstreamStarred(
+	record: Repository,
+	userId: string,
+	starred: boolean,
+): Promise<void> {
+	const upstream = upstreamCoordinates(record);
+	if (!upstream) return;
+	await redis.set(starredKey(userId, upstream), starred ? 1 : 0, { ex: STARRED_TTL_SECONDS });
 }

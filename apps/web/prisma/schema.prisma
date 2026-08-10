@@ -170,6 +170,10 @@ model Repository {
   licenseSpdx      String?
   languagesJson    String?
   metadataSyncedAt DateTime?
+  /// Issues live upstream while pull requests are ours, so both share one
+  /// counter — seeded above the upstream's highest number so `#123` is never
+  /// ambiguous and old links keep resolving.
+  nextNumber       Int       @default(1)
   upstreamHost   String?
   upstreamOwner  String?
   upstreamName   String?
@@ -184,6 +188,7 @@ model Repository {
   ownerUser     User?                    @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
   organization  Organization?            @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   collaborators RepositoryCollaborator[]
+  pullRequests  PullRequest[]
 
   @@unique([owner, name])
   @@unique([upstreamHost, upstreamOwner, upstreamName])
@@ -205,6 +210,124 @@ model RepositoryCollaborator {
   @@id([repositoryId, userId])
   @@index([userId])
   @@map("repository_collaborators")
+}
+
+/// A pull request we own: the branches live in our git backend, so the merge
+/// has to happen there too. Author identity is denormalised so the
+/// GitHub-shaped payload the pull request pages consume needs no user join.
+model PullRequest {
+  id           String  @id @default(cuid())
+  repositoryId String
+  number       Int
+  title        String
+  bodyMd       String  @default("")
+  /// "open", "merged" or "closed".
+  state        String  @default("open")
+  draft        Boolean @default(false)
+
+  headBranch   String
+  baseBranch   String
+  /// Tip we last compared; a newer branch head means the diff is stale.
+  headSha      String
+  baseSha      String
+  mergeSha     String?
+  /// Diff size at `headSha`, so a list of 20 pull requests is one query.
+  additions    Int     @default(0)
+  deletions    Int     @default(0)
+  changedFiles Int     @default(0)
+
+  /// Stacks: the pull request whose head branch this one is based on.
+  parentId String?
+  /// Shared by every pull request in one stack, so it is a single query.
+  stackId  String?
+
+  authorId        String
+  authorLogin     String?
+  authorName      String?
+  authorAvatarUrl String?
+  mergedById      String?
+  mergedAt        DateTime?
+  closedAt        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  repository Repository           @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  parent     PullRequest?         @relation("PullRequestStack", fields: [parentId], references: [id], onDelete: SetNull)
+  children   PullRequest[]        @relation("PullRequestStack")
+  reviews    PullRequestReview[]
+  comments   PullRequestComment[]
+  events     PullRequestEvent[]
+
+  @@unique([repositoryId, number])
+  @@index([repositoryId, state])
+  @@index([stackId])
+  @@map("pull_requests")
+}
+
+model PullRequestReview {
+  id                String   @id @default(cuid())
+  pullRequestId     String
+  reviewerId        String
+  reviewerLogin     String?
+  reviewerName      String?
+  reviewerAvatarUrl String?
+  /// "approved", "changes_requested" or "commented".
+  state             String
+  bodyMd            String   @default("")
+  commitSha         String
+  createdAt         DateTime @default(now())
+
+  pullRequest PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@index([pullRequestId, createdAt])
+  @@map("pull_request_reviews")
+}
+
+/// One row for both conversation and review comments: a review comment is one
+/// anchored to a path and line.
+model PullRequestComment {
+  id              String    @id @default(cuid())
+  pullRequestId   String
+  authorId        String
+  authorLogin     String?
+  authorName      String?
+  authorAvatarUrl String?
+  bodyMd          String
+  path            String?
+  line            Int?
+  /// "LEFT" or "RIGHT" for an anchored comment.
+  side            String?
+  commitSha       String?
+  diffHunk        String?
+  inReplyToId     String?
+  resolvedAt      DateTime?
+  resolvedById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  pullRequest PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@index([pullRequestId, createdAt])
+  @@map("pull_request_comments")
+}
+
+/// The timeline, and the audit trail for anything an agent does: a resolution
+/// can always be traced back to the run that produced it.
+model PullRequestEvent {
+  id            String   @id @default(cuid())
+  pullRequestId String
+  /// "opened", "pushed", "rebased", "merged", "closed", "reopened",
+  /// "conflict_resolved", ...
+  kind          String
+  payloadJson   String?
+  actorId       String?
+  actorLogin    String?
+  createdAt     DateTime @default(now())
+
+  pullRequest PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@index([pullRequestId, createdAt])
+  @@map("pull_request_events")
 }
 
 model GithubCacheEntry {

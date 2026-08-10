@@ -31,6 +31,16 @@ import {
 	hostedTags,
 	hostedTree,
 } from "./repos/hosted-source";
+import {
+	hostedPull,
+	hostedPullBundle,
+	hostedPullComments,
+	hostedPullCommits,
+	hostedPullFiles,
+	hostedPullPage,
+	hostedPullReviews,
+	hostedPullReviewThreads,
+} from "./pulls/hosted-source";
 import { repositoryPermission } from "./repos/registry";
 
 export type RepoPermissions = {
@@ -3058,6 +3068,13 @@ export async function getRepoReadme(owner: string, repo: string, ref?: string) {
 }
 
 export async function getPullRequest(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchPullRequestFromGitHub>>>(
+			await hostedPull(hosted, pullNumber),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -3072,6 +3089,13 @@ export async function getPullRequest(owner: string, repo: string, pullNumber: nu
 }
 
 export async function getPullRequestFiles(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchPullRequestFilesFromGitHub>>>(
+			await hostedPullFiles(hosted, pullNumber),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -3086,6 +3110,13 @@ export async function getPullRequestFiles(owner: string, repo: string, pullNumbe
 }
 
 export async function getPullRequestComments(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<
+			Awaited<ReturnType<typeof fetchPullRequestCommentsFromGitHub>>
+		>(await hostedPullComments(hosted, pullNumber));
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -3100,6 +3131,13 @@ export async function getPullRequestComments(owner: string, repo: string, pullNu
 }
 
 export async function getPullRequestReviews(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchPullRequestReviewsFromGitHub>>>(
+			await hostedPullReviews(hosted, pullNumber),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -3114,6 +3152,13 @@ export async function getPullRequestReviews(owner: string, repo: string, pullNum
 }
 
 export async function getPullRequestCommits(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchPullRequestCommitsFromGitHub>>>(
+			await hostedPullCommits(hosted, pullNumber),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -3151,6 +3196,9 @@ export async function getPullRequestReviewThreads(
 	repo: string,
 	pullNumber: number,
 ): Promise<ReviewThread[]> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) return await hostedPullReviewThreads(hosted, pullNumber);
+
 	const token = await getGitHubToken();
 	if (!token) return [];
 
@@ -3811,6 +3859,9 @@ export async function getPullRequestBundle(
 	repo: string,
 	pullNumber: number,
 ): Promise<PRBundleData | null> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) return await hostedPullBundle(hosted, pullNumber);
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -5314,6 +5365,14 @@ export async function getRepoPullRequests(
 	repo: string,
 	state: "open" | "closed" | "all" = "open",
 ) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		const { prs } = await hostedPullPage(hosted, state, { perPage: 50 });
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoPullRequestsFromGitHub>>>(
+			prs,
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -5512,6 +5571,9 @@ export async function getRepoPullRequestsWithStats(
 		cursor?: string | null;
 	},
 ): Promise<PRPageResult> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) return await hostedPullPage(hosted, state, opts);
+
 	const token = await getGitHubToken();
 	if (!token) return EMPTY_PAGE_RESULT;
 

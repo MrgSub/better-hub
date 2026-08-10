@@ -6,6 +6,7 @@ import { getGitProvider, type GitBackend } from "@/lib/git";
 import type { GitProvider } from "@/lib/git/provider";
 import type { RepoRef } from "@/lib/git/types";
 import type { RepoPageData } from "@/lib/github";
+import { hostedOpenPullCount } from "@/lib/pulls/hosted-source";
 import type { UpstreamPermission } from "./policy";
 import { findRepository, repositoryPermission } from "./registry";
 import {
@@ -157,16 +158,17 @@ export async function hostedPageData(
 		repositoryPermission(h.record, viewer.userId),
 		viewer.token ? cachedUpstreamStarred(h.record, viewer.userId, viewer.token) : false,
 	]);
-	const [repoData, latestCommit] = await Promise.all([
+	const [repoData, latestCommit, openPrs] = await Promise.all([
 		hostedRepoData(h, permission),
 		hostedHead(h),
+		hostedOpenPullCount(h.record.id),
 	]);
 	return {
 		repoData,
 		// Issues still live upstream, so their count is the copied one; pull
-		// requests become ours, so theirs stays zero until that table exists.
+		// requests are ours, so theirs is counted here.
 		navCounts: {
-			openPrs: 0,
+			openPrs,
 			openIssues: h.record.openIssues,
 			activeRuns: 0,
 			discussions: 0,

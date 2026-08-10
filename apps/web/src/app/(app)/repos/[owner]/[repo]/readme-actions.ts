@@ -3,6 +3,7 @@
 import { getOctokit, getGitHubToken } from "@/lib/github";
 import { renderMarkdownToHtml } from "@/components/shared/markdown-renderer";
 import { setCachedReadmeHtml } from "@/lib/readme-cache";
+import { hostedReadme, hostedRepo } from "@/lib/repos/hosted-source";
 import {
 	setCachedRepoLanguages,
 	setCachedContributorAvatars,
@@ -12,34 +13,11 @@ import {
 	type BranchRef,
 } from "@/lib/repo-data-cache";
 
-export async function revalidateReadme(
-	owner: string,
-	repo: string,
-	branch: string,
-): Promise<string | null> {
-	const octokit = await getOctokit();
-	if (!octokit) return null;
+/** Hosted repos read their README from our git backend; the rest from GitHub. */
+async function readReadme(owner: string, repo: string, branch: string): Promise<string | null> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) return (await hostedReadme(hosted, branch))?.content ?? null;
 
-	try {
-		const { data } = await octokit.repos.getReadme({
-			owner,
-			repo,
-			ref: branch,
-		});
-		const content = Buffer.from(data.content, "base64").toString("utf-8");
-		const html = await renderMarkdownToHtml(content, { owner, repo, branch });
-		await setCachedReadmeHtml(owner, repo, html);
-		return html;
-	} catch {
-		return null;
-	}
-}
-
-export async function fetchReadmeMarkdown(
-	owner: string,
-	repo: string,
-	branch: string,
-): Promise<string | null> {
 	const octokit = await getOctokit();
 	if (!octokit) return null;
 
@@ -53,6 +31,27 @@ export async function fetchReadmeMarkdown(
 	} catch {
 		return null;
 	}
+}
+
+export async function revalidateReadme(
+	owner: string,
+	repo: string,
+	branch: string,
+): Promise<string | null> {
+	const content = await readReadme(owner, repo, branch);
+	if (content === null) return null;
+
+	const html = await renderMarkdownToHtml(content, { owner, repo, branch });
+	await setCachedReadmeHtml(owner, repo, html);
+	return html;
+}
+
+export async function fetchReadmeMarkdown(
+	owner: string,
+	repo: string,
+	branch: string,
+): Promise<string | null> {
+	return readReadme(owner, repo, branch);
 }
 
 export async function revalidateLanguages(

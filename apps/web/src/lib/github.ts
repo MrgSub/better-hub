@@ -7042,23 +7042,35 @@ async function fetchRepoPageDataGraphQL(
 	};
 }
 
+/**
+ * Repositories we host answer from Postgres and their git backend, so they need
+ * no GitHub round trip and nothing cached from one — including on the
+ * background revalidation path, which would otherwise refill GitHub-derived
+ * caches for a repo whose truth is ours.
+ */
+async function hostedPageDataResult(
+	owner: string,
+	repo: string,
+	authCtx: GitHubAuthContext,
+): Promise<RepoPageDataResult | null> {
+	const hosted = await hostedRepo(owner, repo);
+	if (!hosted) return null;
+	return {
+		success: true,
+		data: await hostedPageData(hosted, {
+			userId: authCtx.userId,
+			login: authCtx.githubUser?.login ?? null,
+		}),
+	};
+}
+
 export const getRepoPageData = cache(
 	async (owner: string, repo: string): Promise<RepoPageDataResult> => {
 		const authCtx = await getGitHubAuthContext();
 		if (!authCtx) return { success: false, error: "Not authenticated" };
 
-		// Repositories we host answer from Postgres and their git backend, so
-		// they need no GitHub round trip and no cache of one.
-		const hosted = await hostedRepo(owner, repo);
-		if (hosted) {
-			return {
-				success: true,
-				data: await hostedPageData(hosted, {
-					userId: authCtx.userId,
-					login: authCtx.githubUser?.login ?? null,
-				}),
-			};
-		}
+		const hosted = await hostedPageDataResult(owner, repo, authCtx);
+		if (hosted) return hosted;
 
 		const { getCachedRepoPageData } = await import("@/lib/repo-data-cache-vc");
 		const cached = await getCachedRepoPageData<RepoPageData>(
@@ -7078,6 +7090,9 @@ export async function fetchAndCacheRepoPageData(
 ): Promise<RepoPageDataResult> {
 	const authCtx = await getGitHubAuthContext();
 	if (!authCtx) return { success: false, error: "Not authenticated" };
+
+	const hosted = await hostedPageDataResult(owner, repo, authCtx);
+	if (hosted) return hosted;
 
 	try {
 		const result = await fetchRepoPageDataGraphQL(authCtx.token, owner, repo);

@@ -47,6 +47,48 @@ on your branch, authed UI is unreachable — say so rather than faking it.
    `/repos/admin/hello-world/issues` for an issue. Without seeding every list is empty and proves
    nothing.
 
+### Signing in with NO browser (when computer-use/GUI is unavailable)
+
+The emulator's authorize page is a plain form per user, so the whole OAuth dance is curl-able and
+yields a **real** Better Auth session — no cookie forging, no DB row surgery:
+
+```bash
+signin() { U=$1; JAR=$2; rm -f $JAR
+  URL=$(curl -s -c $JAR -X POST localhost:3000/api/auth/sign-in/social \
+        -H 'Content-Type: application/json' -d '{"provider":"github","callbackURL":"/dashboard"}' \
+        | python3 -c "import json,sys;print(json.load(sys.stdin)['url'])")
+  curl -s -b $JAR -c $JAR "$URL" > /tmp/az.html          # authorize page: one <form> per user
+  ST=$(grep -o 'name="state"[^>]*value="[^"]*"' /tmp/az.html | head -1 | grep -o 'value="[^"]*"' | cut -d'"' -f2)
+  RU=$(grep -o 'name="redirect_uri"[^>]*value="[^"]*"' /tmp/az.html | head -1 | grep -o 'value="[^"]*"' | cut -d'"' -f2)
+  SC=$(grep -o 'name="scope"[^>]*value="[^"]*"' /tmp/az.html | head -1 | grep -o 'value="[^"]*"' | cut -d'"' -f2)
+  LOC=$(curl -s -D - -o /dev/null -b $JAR -c $JAR -X POST localhost:4000/login/oauth/callback \
+        --data-urlencode "login=$U" --data-urlencode "state=$ST" --data-urlencode "redirect_uri=$RU" \
+        --data-urlencode "scope=$SC" --data-urlencode "client_id=your_github_oauth_app_client_id" \
+        | grep -i '^location:' | tail -1 | tr -d '\r' | sed 's/^[Ll]ocation: //')
+  curl -s -o /dev/null -b $JAR -c $JAR "$LOC"; }          # MUST be a GET
+signin ghost /tmp/ghost.jar; signin admin /tmp/admin.jar
+curl -s -b /tmp/ghost.jar localhost:3000/api/auth/get-session   # verify identity
+```
+
+Gotcha: `curl -L` re-POSTs the emulator's redirect to `/api/auth/callback/github` and gets **415** —
+capture the `Location` and GET it. Verify identities via `/api/auth/get-session` before trusting a
+jar; two jars in parallel give you owner + outsider without incognito windows.
+
+### If the whole GUI dies mid-session
+
+Symptom: `~/.vnc/*.log` ends with `The X11 connection broke: I/O error` / `XIO: fatal IO error`, and
+every `computer` call says "Computer-use engine is not yet initialized". You can restore X yourself:
+
+```bash
+vncserver :0 -rfbport 5901 -geometry 1600x1122 -depth 24 \
+  -SecurityTypes VncAuth -passwd /opt/.devin/package/vnc_client/passwd
+DISPLAY=:0 setsid nohup startplasma-x11 >/tmp/plasma.log 2>&1 &
+```
+
+(the display must be `:0` on rfbport **5901** — the platform's original layout). That brings back
+`xdotool`/`wmctrl`/Chrome, but it does **not** revive the computer-use engine, which is platform-side:
+expect to need a box reboot. Plan for a shell-only fallback rather than losing the whole pass.
+
 ### What works vs. breaks against the emulator
 
 - Works: sign-in/sign-out, `/issues`, `/pulls`, `/search` (Repos/Issues/Users tabs), the navbar user
@@ -80,6 +122,36 @@ on your branch, authed UI is unreachable — say so rather than faking it.
   inside a subshell may not survive — use `nohup bun dev > /tmp/dev.log 2>&1 &`.
 - No `psql` on the box; query Postgres with
   `docker exec $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) psql -U postgres -d better_hub -c '...'`.
+
+## Proving a repo-scoped GitHub call did NOT happen (hidden hosted repos)
+
+For the `hostedButHidden`/`upstreamOctokit` family of gates, the only real evidence is the emulator
+proxy's request log, and a "zero requests" result is worthless without a positive control.
+
+- Instrument `~/emu-proxy.mjs` with `console.log(\`REQ ${req.method} ${req.url}\`)` plus the GraphQL
+  `variables` (never headers), redirect to a log file, truncate it before each case. Remember to
+  revert this patch during cleanup.
+- Seed the adversarial pair: a **private hosted** Postgres repo `admin/<name>` with real Code Storage
+  content, **and** a same-named emulator repo carrying obvious markers
+  (`description`, plus `POST /repos/admin/<name>/releases` with a marker `name`). Verify the decoy is
+  genuinely readable via curl first — otherwise "nothing leaked" proves nothing.
+- **Empty `github_cache_entries` before every case** (`delete from github_cache_entries;`). A cached
+  row makes the code skip the upstream call and fakes a pass. Next's own fetch cache also hides
+  requests, so a name already fetched in this server lifetime cannot be reused for a control — use a
+  **fresh repo name** for the private→public differential.
+- Control that makes the zero meaningful: same outsider, same URL, `isPrivate=true` → expect **zero**
+  `/repos/admin/<name>…`; flip `isPrivate=false` → expect the call to appear *and* the decoy marker to
+  render. If the public case is also zero, your test is dead and proves nothing.
+- Which routes enter which seam (as of cc2f923): overview = `repos/[owner]/[repo]/page.tsx` +
+  `layout.tsx` → `getRepoPageData` → `hostedPageDataResult`; releases = `releases/page.tsx` →
+  `getRepoReleases` (its "empty ⇒ try fresh" fallback is the historically ungated one), also reached
+  from `tags/page.tsx` and `releases/[tag]/page.tsx`; `releases/actions.ts` uses the already-gated
+  `getRepoReleasesPage`.
+- Also assert the **background revalidation** path: load the hidden page twice, wait ~30 s, then check
+  both the log and `select count(*) from github_cache_entries where "cacheKey" like '%<name>%'` — a
+  gate that only covers the request path can still refill GitHub-derived caches later.
+- A *visible* hosted repo makes **no** GraphQL call (it is served from Postgres/Code Storage), so the
+  positive control for the GraphQL seam must be a **non-hosted** repo, not a public hosted one.
 
 ## Stubbing API responses in the browser
 
@@ -255,3 +327,71 @@ Things that will otherwise waste your time:
 ### Devin Secrets Needed
 - `PIERRE_STORAGE_KEY` (with `PIERRE_STORAGE_NAME=orchid`) in the dev-server env for any hosted read
   or provider script.
+
+## Hosted repo permissions, archiving and settings (PR #10 / #8)
+
+### The single read gate
+`hostedRepo(owner, name)` in `apps/web/src/lib/repos/hosted-source.ts` returns **null** when
+`record.isPrivate && !repositoryPermission(record, viewerId())`. Every hosted read resolves through
+it, so testing private isolation means hitting many surfaces but reasoning about one gate.
+
+Denied hosted pages render `Unable to load repository` / `GraphQL request failed: 404` (the
+non-hosted fallback failing), **not** a bespoke "private" page. Do not read that as a crash.
+
+**Always grep the delivered HTML, not just the screenshot.** A page can look empty while shipping
+data in the RSC flight payload. The `computer` tool saves each load to `/tmp/page_html_*.html`;
+grep it for file names, file contents, branch names, tag names, PR titles and commit subjects.
+
+### Two-window setup for permission testing
+Use a normal window signed in as the owner and an **incognito** window signed in as a second user.
+Caveats that will waste time otherwise:
+- The tool's returned HTML/DOM sometimes belongs to the *other* window. Trust the screenshot and the
+  `/tmp/page_html_*.html` whose URL matches; re-take a screenshot if they disagree.
+- `browser_console` / `read_dom` attach to only one target, so DOM queries may silently return empty
+  for the window you are looking at. Prefer visual checks plus HTML greps.
+- Signed-out checks are fine with plain `curl` (no session involved).
+
+### Granting/revoking collaborators
+There is no collaborator UI; use `grantCollaborator(repositoryId, userId, permission)` from
+`lib/repos/registry` in a throwaway script, and `prisma.repositoryCollaborator.deleteMany` to revoke.
+Test the **flip back** — revoking must deny again — otherwise you have not proven the gate keys on
+the grant rather than on a cache.
+
+### Archived writes
+`writeRefusal()` checks `archived` **before** permission, so the owner/admin must also be refused
+with exactly `This repository is archived`. Drive it as the owner, or the test proves nothing.
+The seven paths worth covering: `createHostedPull`, `mergeHostedPull`, `updateHostedPullBranch`,
+`setHostedPullState` (closed *and* open), `resolveHostedConflicts`, `commitHostedResolution`.
+In the UI, `Update branch` is merely *disabled* when archived — check the server layer too.
+Always finish with unarchive + a real write, or a build that broke all writes would also "pass".
+
+### Known traps in hosted settings
+- **Rename breaks a hosted repo.** `providerRef(record)` falls back to `{owner, name}` when
+  `gitRepoId` contains no `/` (Code Storage ids are opaque, e.g. `HMZ2NNp13deleRLM4qIWG`). After a
+  rename every git call targets a repo the backend does not have → `repository not found` on every
+  page. Restore with `update repositories set name='<old>'`. Verify with a probe comparing
+  `git.listBranches(providerRef(rec))` against `git.listBranches({owner, repo: oldName})`.
+- The rename redirect goes to `/repos/<owner>/<new>/settings`, not the canonical `/<owner>/<new>`.
+- **A soft reload (F5) can serve a stale settings page** — the value shown may lag one save behind
+  the database. Always confirm with `ctrl+shift+r` before calling a save broken.
+- Saves can sit on `Saving…` far longer than the request takes; check the DB and the dev log
+  (`POST /<owner>/<repo>/settings 200`) before concluding it hung.
+- Visibility changes need a **second** click on Save (an inline confirm step).
+
+### Verifying "no GitHub call for a hosted repo"
+Tail the emulator and proxy logs and `grep -c "repos/<owner>/<repo>"` after a settings load+save;
+it must be 0. `api.github.com/user` and `/notifications` still appear — those are not repo calls.
+
+### The non-hosted settings path cannot be tested on the emulator
+Since #8, `getRepo()` for a non-hosted repo goes through `readLocalFirstGitData` → **GraphQL**, and
+the GitHub emulator has no `/graphql` endpoint (returns 404 for any query). Seeding a repo via
+`POST /user/repos` is not enough; the settings page still shows `Unable to load repository`.
+Treat the non-hosted regression as untested locally unless a real GitHub token is available.
+
+### Server actions that need a request scope
+`readme-actions.ts` (`revalidateBranches`, `revalidateTags`, `fetchReadmeMarkdown`,
+`revalidateLanguages`) call `headers()`, so they throw
+`` `headers` was called outside a request scope `` when invoked from a script. They are only
+reachable through the browser, and a denied viewer never gets them shipped. Note the residual risk:
+these actions **fall through to octokit** when `hostedRepo` returns null, so a same-named public
+GitHub repo could be served in place of a private hosted one.

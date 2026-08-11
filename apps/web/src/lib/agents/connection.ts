@@ -137,12 +137,8 @@ export interface ResolvedAgentConnection {
 	accountId: string | null;
 }
 
-/**
- * The agent a repository's conflicts may be sent to, or null when nobody has
- * turned one on — which is the default, and is why callers must treat "no
- * agent" as an ordinary answer rather than a misconfiguration.
- */
-export async function repositoryAgent(record: Repository): Promise<ResolvedAgentConnection | null> {
+/** The connection an agent can actually run on, still encrypted. */
+async function usableConnection(record: Repository): Promise<AgentConnection | null> {
 	const scope = agentScope(record);
 	if (!scope) return null;
 
@@ -151,15 +147,35 @@ export async function repositoryAgent(record: Repository): Promise<ResolvedAgent
 
 	const provider = isAgentProvider(connection.provider) ? connection.provider : "model";
 	if (providerNeedsAccount(provider) && !connection.accountId) return null;
-	if (!connection.apiKeyEnc) {
-		return providerNeedsKey(provider)
-			? null
-			: { provider, apiKey: null, accountId: connection.accountId };
-	}
+	if (providerNeedsKey(provider) && !connection.apiKeyEnc) return null;
+	return connection;
+}
 
+/**
+ * Whether a repository's conflicts may be sent to an agent. Rendering asks this
+ * rather than `repositoryAgent`, because a decrypted key must never be the
+ * value a server component awaits: React serialises awaited values into the
+ * flight stream, so the key would reach the browser even unreferenced.
+ */
+export async function hasRepositoryAgent(record: Repository): Promise<boolean> {
+	return !!(await usableConnection(record));
+}
+
+/**
+ * The agent a repository's conflicts may be sent to, or null when nobody has
+ * turned one on — which is the default, and is why callers must treat "no
+ * agent" as an ordinary answer rather than a misconfiguration.
+ */
+export async function repositoryAgent(record: Repository): Promise<ResolvedAgentConnection | null> {
+	const connection = await usableConnection(record);
+	if (!connection) return null;
+
+	const provider = isAgentProvider(connection.provider) ? connection.provider : "model";
 	return {
 		provider,
-		apiKey: await symmetricDecrypt({ key: authSecret(), data: connection.apiKeyEnc }),
+		apiKey: connection.apiKeyEnc
+			? await symmetricDecrypt({ key: authSecret(), data: connection.apiKeyEnc })
+			: null,
 		accountId: connection.accountId,
 	};
 }

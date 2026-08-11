@@ -12,7 +12,13 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { prisma } from "@/lib/db";
-import { agentScope, connectionView, repositoryAgent, saveAgentConnection } from "./connection";
+import {
+	agentScope,
+	connectionView,
+	hasRepositoryAgent,
+	repositoryAgent,
+	saveAgentConnection,
+} from "./connection";
 
 const repo = {
 	id: "repo_1",
@@ -215,5 +221,30 @@ describe("repositoryAgent", () => {
 			apiKey: "cog_abc",
 			accountId: "org_x",
 		});
+	});
+});
+
+// Rendering must never await the decrypted key: react serialises awaited values
+// into the flight stream, so asking for the whole connection to show a button
+// ships the key to the browser.
+describe("hasRepositoryAgent", () => {
+	it("answers without decrypting the key", async () => {
+		vi.mocked(prisma.agentConnection.findUnique).mockResolvedValue(
+			connection({
+				provider: "devin",
+				enabled: true,
+				apiKeyEnc: "not-decryptable",
+				accountId: "org_x",
+			}),
+		);
+		await expect(hasRepositoryAgent(repo)).resolves.toBe(true);
+		await expect(repositoryAgent(repo)).rejects.toThrow();
+	});
+
+	it("stays false for the connections repositoryAgent refuses", async () => {
+		vi.mocked(prisma.agentConnection.findUnique).mockResolvedValue(
+			connection({ provider: "devin", enabled: true, apiKeyEnc: "cipher" }),
+		);
+		expect(await hasRepositoryAgent(repo)).toBe(false);
 	});
 });

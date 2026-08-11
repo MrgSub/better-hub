@@ -34,7 +34,7 @@ import { PRMergePanel } from "@/components/pr/pr-merge-panel";
 import { PRCommentForm } from "@/components/pr/pr-comment-form";
 import { PRReviewForm } from "@/components/pr/pr-review-form";
 import { PRConflictResolver } from "@/components/pr/pr-conflict-resolver";
-import { repositoryAgent } from "@/lib/agents/connection";
+import { hasRepositoryAgent } from "@/lib/agents/connection";
 import { PRAuthorDossier } from "@/components/pr/pr-author-dossier";
 import { PRChecksPanel } from "@/components/pr/pr-checks-panel";
 import { PROverviewPanel } from "@/components/pr/pr-overview-panel";
@@ -390,7 +390,7 @@ export default async function PRDetailPage({
 	// so the button is absent rather than offering something that would refuse.
 	const hostedForResolve = showConflictResolver ? await hostedRepo(owner, repo) : null;
 	const canResolveAutomatically =
-		!!hostedForResolve && !!(await repositoryAgent(hostedForResolve.record));
+		!!hostedForResolve && (await hasRepositoryAgent(hostedForResolve.record));
 	const headSha = pr.head.sha;
 	const headBranch = pr.head.ref;
 	const baseSha = pr.base.sha;

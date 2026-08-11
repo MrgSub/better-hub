@@ -1,6 +1,6 @@
 "use server";
 
-import { getOctokit, invalidateRepoPullRequestsCache } from "@/lib/github";
+import { invalidateRepoPullRequestsCache, upstreamOctokit } from "@/lib/github";
 import { hostedPullActor } from "@/lib/pulls/actor";
 import { createHostedPull } from "@/lib/pulls/create";
 import { hostedCompare } from "@/lib/pulls/hosted-source";
@@ -47,7 +47,7 @@ export async function compareBranches(
 		}
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { success: false, error: "Not authenticated" };
 
 	try {
@@ -122,7 +122,7 @@ export async function createPullRequest(
 		return { success: true, number: result.pullRequest.number };
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { success: false, error: "Not authenticated" };
 
 	try {
@@ -157,7 +157,7 @@ export interface BranchInfo {
 }
 
 async function listBranchesForRepo(
-	octokit: Awaited<ReturnType<typeof getOctokit>>,
+	octokit: Awaited<ReturnType<typeof upstreamOctokit>>,
 	repoOwner: string,
 	repoName: string,
 	defaultBranch: string,
@@ -207,7 +207,7 @@ export async function fetchBranches(owner: string, repo: string): Promise<Branch
 	const hosted = await hostedRepo(owner, repo);
 	if (hosted) return await hostedBranchInfos(hosted);
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return [];
 
 	try {

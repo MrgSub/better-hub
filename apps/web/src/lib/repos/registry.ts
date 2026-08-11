@@ -27,14 +27,14 @@ export function upstreamIdentity(
 /**
  * How the backend knows this repository, as opposed to how we display it.
  *
- * The backend named it at creation time and recorded that name in
- * `gitRepoId`; our `owner`/`name` are display coordinates that a rename or a
- * casing fix can move underneath it. Reads therefore go by the recorded id,
- * falling back to the display pair for rows written before it was stored.
+ * The backend named it at creation time and cannot rename it, while our
+ * `owner`/`name` are display coordinates a rename or a casing fix moves
+ * underneath it — so those two must not be confused. `gitRepoId` is no
+ * substitute either: a backend is free to make it an opaque id rather than a
+ * path, and Code Storage does.
  */
 export function providerRef(record: Repository): RepoRef {
-	const [owner, repo] = record.gitRepoId.split("/");
-	return owner && repo ? { owner, repo } : { owner: record.owner, repo: record.name };
+	return { owner: record.gitOwner, repo: record.gitName };
 }
 
 export function findCanonicalRepository(upstream: UpstreamIdentity): Promise<Repository | null> {
@@ -103,6 +103,8 @@ export function recordRepository(input: RecordRepositoryInput): Promise<Reposito
 			defaultBranch: input.repo.defaultBranch,
 			gitBackend: input.backend,
 			gitRepoId: input.repo.id,
+			gitOwner: input.repo.owner,
+			gitName: input.repo.name,
 			description: input.metadata?.description ?? null,
 			homepage: input.metadata?.homepage ?? null,
 			topics: input.metadata?.topics ?? [],
@@ -148,6 +150,21 @@ export async function repositoryPermission(
 	if (membership?.role === "admin") return "admin";
 	if (collaborator) return collaborator.permission as UpstreamPermission;
 	return membership ? "write" : null;
+}
+
+/**
+ * Why a write has to be refused, or null when it may proceed. Archived comes
+ * first because it holds even for an admin: the point of archiving is that the
+ * repository stops changing until someone lifts it in settings.
+ */
+export async function writeRefusal(
+	repository: Repository,
+	userId: string | null,
+): Promise<string | null> {
+	if (repository.archived) return "This repository is archived";
+	const permission = await repositoryPermission(repository, userId);
+	if (permission === "admin" || permission === "write") return null;
+	return "You do not have write access to this repository";
 }
 
 export async function grantCollaborator(

@@ -28,7 +28,9 @@ function record(overrides: Partial<Repository> = {}): Repository {
 		name: "hello",
 		defaultBranch: "main",
 		gitBackend: "code-storage",
-		gitRepoId: "adam/hello",
+		gitRepoId: "HMZ2NNp13deleRLM4qIWG",
+		gitOwner: "adam",
+		gitName: "hello",
 		archived: false,
 		...overrides,
 	} as Repository;
@@ -104,6 +106,16 @@ describe("updateHostedRepository", () => {
 		});
 
 		expect(result.ok).toBe(true);
+	});
+
+	it("renames what we display and nothing the backend is addressed by", async () => {
+		const result = await updateHostedRepository(repo(), "user_1", { name: "hello-2" });
+
+		expect(result.ok).toBe(true);
+		expect(prisma.repository.update).toHaveBeenCalledWith({
+			where: { id: "repo_1" },
+			data: { name: "hello-2" },
+		});
 	});
 
 	it("refuses a rename onto a name that is taken", async () => {

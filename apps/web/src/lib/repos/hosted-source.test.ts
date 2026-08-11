@@ -8,19 +8,28 @@ vi.mock("@/lib/db", () => ({
 		repository: {
 			count: vi.fn().mockResolvedValue(0),
 			findUnique: vi.fn().mockResolvedValue(null),
+			findFirst: vi.fn().mockResolvedValue(null),
 		},
+		repositoryCollaborator: { findUnique: vi.fn().mockResolvedValue(null) },
+		organizationMember: { findUnique: vi.fn().mockResolvedValue(null) },
 	},
 }));
+vi.mock("./viewer", () => ({ viewerId: vi.fn().mockResolvedValue(null) }));
+vi.mock("@/lib/git", () => ({ getGitProvider: vi.fn(() => ({}) as GitProvider) }));
 
+import { prisma } from "@/lib/db";
 import {
 	hostedCommit,
+	hostedButHidden,
 	hostedCommits,
 	hostedContents,
 	hostedFileContent,
 	hostedReadme,
+	hostedRepo,
 	hostedRepoData,
 	type HostedRepo,
 } from "./hosted-source";
+import { viewerId } from "./viewer";
 import { providerRef } from "./registry";
 
 function record(overrides: Partial<Repository> = {}): Repository {
@@ -30,7 +39,9 @@ function record(overrides: Partial<Repository> = {}): Repository {
 		name: "hello",
 		defaultBranch: "main",
 		gitBackend: "code-storage",
-		gitRepoId: "adam/hello",
+		gitRepoId: "HMZ2NNp13deleRLM4qIWG",
+		gitOwner: "adam",
+		gitName: "hello",
 		description: null,
 		homepage: null,
 		topics: [],
@@ -346,16 +357,60 @@ describe("hostedCommit", () => {
 });
 
 describe("providerRef", () => {
-	it("addresses the backend by the id it assigned, not our display name", () => {
+	it("addresses the backend by its own coordinates, not our display name", () => {
 		// Display casing drifted after the import; the backend never saw it.
-		const drifted = record({ owner: "Adam", name: "Hello", gitRepoId: "adam/hello" });
+		const drifted = record({ owner: "Adam", name: "Hello" });
 		expect(providerRef(drifted)).toEqual({ owner: "adam", repo: "hello" });
 	});
 
-	it("falls back to the display pair for a row written before ids were stored", () => {
-		expect(providerRef(record({ gitRepoId: "" }))).toEqual({
+	it("keeps addressing the same repository after a rename", () => {
+		// A rename moves display coordinates only, so a backend that cannot
+		// rename a repository must still be asked for the one it created.
+		expect(providerRef(record({ name: "hello-renamed" }))).toEqual({
 			owner: "adam",
 			repo: "hello",
 		});
+	});
+});
+
+describe("hostedRepo", () => {
+	it("resolves a public repository for anyone", async () => {
+		vi.mocked(prisma.repository.findFirst).mockResolvedValue(record());
+
+		expect(await hostedRepo("adam", "hello")).not.toBeNull();
+	});
+
+	it("hides a private repository from someone with no access", async () => {
+		vi.mocked(prisma.repository.findFirst).mockResolvedValue(
+			record({ isPrivate: true, ownerUserId: "user_1" }),
+		);
+		vi.mocked(viewerId).mockResolvedValue("stranger");
+
+		expect(await hostedRepo("adam", "hello")).toBeNull();
+	});
+
+	it("resolves a private repository for its owner", async () => {
+		vi.mocked(prisma.repository.findFirst).mockResolvedValue(
+			record({ isPrivate: true, ownerUserId: "user_1" }),
+		);
+		vi.mocked(viewerId).mockResolvedValue("user_1");
+
+		expect(await hostedRepo("adam", "hello")).not.toBeNull();
+	});
+});
+
+describe("hostedButHidden", () => {
+	it("tells a repository GitHub still hosts apart from one we hide", async () => {
+		vi.mocked(prisma.repository.findFirst).mockResolvedValue(null);
+		expect(await hostedButHidden("adam", "hello")).toBe(false);
+
+		vi.mocked(prisma.repository.findFirst).mockResolvedValue(
+			record({ isPrivate: true, ownerUserId: "user_1" }),
+		);
+		vi.mocked(viewerId).mockResolvedValue("stranger");
+		expect(await hostedButHidden("adam", "hello")).toBe(true);
+
+		vi.mocked(viewerId).mockResolvedValue("user_1");
+		expect(await hostedButHidden("adam", "hello")).toBe(false);
 	});
 });

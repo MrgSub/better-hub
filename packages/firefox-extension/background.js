@@ -1,4 +1,4 @@
-const DEFAULT_HOST = "https://better-hub.com";
+const DEFAULT_HOST = "https://orkd.ai";
 
 browser.runtime.onInstalled.addListener(() => {
 	browser.storage.local.get(["enabled", "host"]).then((data) => {

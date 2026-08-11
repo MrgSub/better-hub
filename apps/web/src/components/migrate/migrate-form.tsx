@@ -31,7 +31,7 @@ interface Migrated {
 const planCopy: Record<Plan["decision"]["kind"], { note: string; action: string }> = {
 	create: {
 		note: "",
-		action: "Migrate to Better Hub",
+		action: "Migrate to Orkd",
 	},
 	join: {
 		note: "Someone already migrated this repository. You have write access on GitHub, so you'll be added to the existing one instead of copying it again.",

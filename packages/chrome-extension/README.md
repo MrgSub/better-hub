@@ -1,6 +1,6 @@
-# Better Hub — Chrome Extension
+# Orkd — Chrome Extension
 
-Redirects GitHub URLs to your Better Hub instance.
+Redirects GitHub URLs to your Orkd instance.
 
 ## Install (Developer Mode)
 
@@ -16,7 +16,7 @@ That's it — GitHub pages will now redirect to `http://localhost:3000`.
 Click the extension icon to:
 
 - **Toggle** redirects on/off
-- **Change host** if your Better Hub runs on a different URL
+- **Change host** if your Orkd runs on a different URL
 
 ## Route Mappings
 

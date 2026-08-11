@@ -34,8 +34,7 @@ export async function generateMetadata({
 	if (actorType === "Organization") {
 		const orgData = await getOrg(owner).catch(() => null);
 		const title = orgData?.name || orgData?.login || userData.name || userData.login;
-		const description =
-			orgData?.description || userData.bio || `${title} on Better Hub`;
+		const description = orgData?.description || userData.bio || `${title} on Orkd`;
 		return {
 			title,
 			description,
@@ -47,7 +46,7 @@ export async function generateMetadata({
 	const displayName = userData.name ? `${userData.name} (${userData.login})` : userData.login;
 	return {
 		title: displayName,
-		description: userData.bio || `${displayName} on Better Hub`,
+		description: userData.bio || `${displayName} on Orkd`,
 		openGraph: { title: displayName, ...ogImages(ogUrl) },
 		twitter: { card: "summary_large_image", ...ogImages(ogUrl) },
 	};

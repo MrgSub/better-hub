@@ -6,7 +6,7 @@ const saveBtn = document.getElementById("save");
 browser.storage.local.get(["enabled", "host"]).then((data) => {
 	const enabled = data.enabled !== false;
 	toggle.checked = enabled;
-	hostInput.value = data.host || "https://better-hub.com";
+	hostInput.value = data.host || "https://orkd.ai";
 	updateStatus(enabled);
 });
 

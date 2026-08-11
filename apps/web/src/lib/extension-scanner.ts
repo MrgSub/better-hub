@@ -8,7 +8,10 @@ import type {
 	CustomThemeType,
 } from "./theme-store-types";
 
-const MANIFEST_FILENAME = "better-hub-extension.json";
+/// Ours first, then the name themes were published under before the rename —
+/// repositories out there still carry it, and we cannot rewrite them.
+const MANIFEST_FILENAMES = ["orkd-extension.json", "better-hub-extension.json"] as const;
+const MANIFEST_FILENAME = MANIFEST_FILENAMES[0];
 const VALID_TYPES: CustomThemeType[] = ["theme", "icon-theme"];
 
 const ALLOWED_GITHUB_HOSTNAMES = new Set([
@@ -211,11 +214,16 @@ export async function scanCustomThemeRepo(
 	owner: string,
 	repo: string,
 ): Promise<CustomThemeScanResult> {
-	let manifestRaw: string;
-	try {
-		manifestRaw = await fetchFileContent(octokit, owner, repo, MANIFEST_FILENAME);
-	} catch (err) {
-		if (err instanceof ScanError) throw err;
+	let manifestRaw: string | null = null;
+	for (const filename of MANIFEST_FILENAMES) {
+		try {
+			manifestRaw = await fetchFileContent(octokit, owner, repo, filename);
+			break;
+		} catch (err) {
+			if (err instanceof ScanError) throw err;
+		}
+	}
+	if (manifestRaw === null) {
 		throw new ScanError(
 			`Could not find ${MANIFEST_FILENAME} in ${owner}/${repo}. Make sure the file exists at the repo root.`,
 			404,

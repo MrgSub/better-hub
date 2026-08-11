@@ -1,8 +1,8 @@
 {
 	"$schema": "http://json-schema.org/draft-07/schema#",
-	"$id": "https://better-hub.com/schemas/icon-theme-manifest.schema.json",
-	"title": "Better Hub Icon Theme Manifest",
-	"description": "Schema for the better-hub-extension.json manifest file when publishing an icon theme to the Better Hub marketplace.",
+	"$id": "https://orkd.ai/schemas/icon-theme-manifest.schema.json",
+	"title": "Orkd Icon Theme Manifest",
+	"description": "Schema for the orkd-extension.json manifest file when publishing an icon theme to the Orkd marketplace.",
 	"type": "object",
 	"required": ["name", "description", "type", "main"],
 	"additionalProperties": false,
@@ -48,9 +48,9 @@
 	},
 	"examples": [
 		{
-			"$schema": "https://better-hub.com/schemas/icon-theme-manifest.schema.json",
+			"$schema": "https://orkd.ai/schemas/icon-theme-manifest.schema.json",
 			"name": "My Icon Theme",
-			"description": "A beautiful file icon theme for Better Hub",
+			"description": "A beautiful file icon theme for Orkd",
 			"version": "1.0.0",
 			"type": "icon-theme",
 			"main": "icons/icon-theme.json",

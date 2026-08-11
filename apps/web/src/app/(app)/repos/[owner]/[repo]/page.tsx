@@ -22,7 +22,7 @@ export async function generateMetadata({
 	const ogUrl = ogImageUrl({ type: "repo", owner, repo });
 	return {
 		title: `${owner}/${repo}`,
-		description: `View ${owner}/${repo} on Better Hub`,
+		description: `View ${owner}/${repo} on Orkd`,
 		openGraph: { title: `${owner}/${repo}`, ...ogImages(ogUrl) },
 		twitter: { card: "summary_large_image", ...ogImages(ogUrl) },
 	};

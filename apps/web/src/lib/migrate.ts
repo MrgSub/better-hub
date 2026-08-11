@@ -339,11 +339,11 @@ async function finish(
 export function buildAgentPrompt(input: MigrateInput, target: RepoRef, cloneUrl: string): string {
 	const from = `${input.upstream.owner}/${input.upstream.name}`;
 	const to = `${target.owner}/${target.repo}`;
-	return `I moved this repository from GitHub (${from}) to Better Hub (${to}).
+	return `I moved this repository from GitHub (${from}) to Orkd (${to}).
 
 In my local clone, please:
 
-1. Point the default remote at Better Hub:
+1. Point the default remote at Orkd:
    git remote set-url origin ${cloneUrl}
 2. Keep GitHub reachable as a secondary remote:
    git remote add github https://github.com/${from}.git

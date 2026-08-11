@@ -67,7 +67,7 @@ export function listUserRepositories(userId: string): Promise<Repository[]> {
 	});
 }
 
-/** Looks a repository up by its Better Hub coordinates, case-insensitively. */
+/** Looks a repository up by its Orkd coordinates, case-insensitively. */
 export function findRepository(owner: string, name: string): Promise<Repository | null> {
 	return prisma.repository.findFirst({
 		where: {

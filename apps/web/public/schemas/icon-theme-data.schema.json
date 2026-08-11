@@ -1,8 +1,8 @@
 {
 	"$schema": "http://json-schema.org/draft-07/schema#",
-	"$id": "https://better-hub.com/schemas/icon-theme-data.schema.json",
-	"title": "Better Hub Icon Theme Data",
-	"description": "Schema for the icon mapping data file referenced by the \"main\" field in better-hub-extension.json. Defines which SVG icons map to which file extensions, filenames, and folders.",
+	"$id": "https://orkd.ai/schemas/icon-theme-data.schema.json",
+	"title": "Orkd Icon Theme Data",
+	"description": "Schema for the icon mapping data file referenced by the \"main\" field in orkd-extension.json. Defines which SVG icons map to which file extensions, filenames, and folders.",
 	"type": "object",
 	"required": ["baseURL"],
 	"additionalProperties": false,
@@ -104,7 +104,7 @@
 	},
 	"examples": [
 		{
-			"$schema": "https://better-hub.com/schemas/icon-theme-data.schema.json",
+			"$schema": "https://orkd.ai/schemas/icon-theme-data.schema.json",
 			"baseURL": "https://raw.githubusercontent.com/user/my-icon-theme/HEAD/icons/",
 			"defaultFile": "file",
 			"defaultFolder": "folder",

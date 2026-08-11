@@ -1,11 +1,11 @@
 {
 	"manifest_version": 3,
-	"name": "Better Hub",
+	"name": "Orkd",
 	"version": "1.0.0",
-	"description": "Redirect GitHub pages to your Better Hub instance",
+	"description": "Redirect GitHub pages to your Orkd instance",
 	"browser_specific_settings": {
 		"gecko": {
-			"id": "better-hub@extension",
+			"id": "orkd@extension",
 			"strict_min_version": "109.0"
 		}
 	},

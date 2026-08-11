@@ -30,7 +30,7 @@ const PROVIDERS: {
 	{
 		id: "model",
 		label: "Built-in model",
-		detail: "Resolves with Better Hub's own model, billed as usual.",
+		detail: "Resolves with Orkd's own model, billed as usual.",
 	},
 	{
 		id: "devin",
@@ -174,8 +174,8 @@ export function AgentSettings({
 						Stored encrypted and never shown again. The agent is
 						sent only the conflicted text — it needs no access
 						to your repositories, because the resolution branch
-						is committed by Better Hub and still has to be
-						merged by a person.
+						is committed by Orkd and still has to be merged by a
+						person.
 					</p>
 				</div>
 			)}

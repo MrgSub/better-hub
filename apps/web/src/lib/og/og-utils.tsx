@@ -164,6 +164,6 @@ export function ogImageUrl(params: Record<string, string | number>): string {
 
 export function ogImages(url: string) {
 	return {
-		images: [{ url, width: OG.width, height: OG.height, alt: "Better Hub" }],
+		images: [{ url, width: OG.width, height: OG.height, alt: "Orkd" }],
 	};
 }

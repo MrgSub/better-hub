@@ -1,6 +1,7 @@
 import type { Repository } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import type { RepoGitInfo, RepoRef } from "@/lib/git/types";
+import type { MirrorMode } from "./mirror";
 import type { UpstreamPermission } from "./policy";
 
 /**
@@ -91,6 +92,8 @@ export interface RecordRepositoryInput {
 	metadata?: RepositoryMetadata;
 	/** Set on the canonical import only; forks inherit their parent's. */
 	upstream?: UpstreamIdentity;
+	/** Whether the backend forwards our refs upstream; see `mirror.ts`. */
+	mirrorMode?: MirrorMode;
 	organizationId?: string;
 	forkOfId?: string;
 }
@@ -113,6 +116,7 @@ export function recordRepository(input: RecordRepositoryInput): Promise<Reposito
 			upstreamHost: input.upstream?.host ?? null,
 			upstreamOwner: input.upstream?.owner ?? null,
 			upstreamName: input.upstream?.name ?? null,
+			mirrorMode: input.mirrorMode ?? "off",
 			organizationId: input.organizationId ?? null,
 			forkOfId: input.forkOfId ?? null,
 			ownerUserId: input.ownerUserId,

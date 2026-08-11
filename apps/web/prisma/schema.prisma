@@ -223,6 +223,18 @@ model Repository {
   upstreamHost   String?
   upstreamOwner  String?
   upstreamName   String?
+  /// Whether the backend forwards the refs we write here to the GitHub
+  /// upstream: "off", or "refs" for branches and tags but nothing else — issues
+  /// and pull requests are not git objects and are not mirrored. Decided at
+  /// import, because the upstream link a backend mirrors through is fixed when
+  /// the repository is created.
+  mirrorMode     String    @default("off")
+  /// Last sync run the backend reported: "syncing", "synced" or "failed", with
+  /// the failure it gave. Mirroring is the backend's job, so this is the only
+  /// place its outcome is visible to us.
+  mirrorState    String?
+  mirrorError    String?
+  mirrorSyncedAt DateTime?
   forkOfId       String?
   ownerUserId    String?
   organizationId String?

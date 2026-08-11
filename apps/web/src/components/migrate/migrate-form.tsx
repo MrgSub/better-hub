@@ -81,6 +81,7 @@ export function MigrateForm() {
 	const [destinationOwner, setDestinationOwner] = useState("");
 	const [name, setName] = useState("");
 	const [defaultBranch, setDefaultBranch] = useState("");
+	const [mirror, setMirror] = useState(false);
 	const [result, setResult] = useState<Migrated | null>(null);
 
 	const kind = plan?.decision.kind ?? "create";
@@ -124,7 +125,7 @@ export function MigrateForm() {
 			const res = await fetch("/api/migrate", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ repo: input, name, defaultBranch }),
+				body: JSON.stringify({ repo: input, name, defaultBranch, mirror }),
 			});
 			const data = await res.json();
 			if (!res.ok) {
@@ -289,6 +290,71 @@ export function MigrateForm() {
 										</p>
 									</div>
 								</div>
+								{!joining && (
+									<label className="flex items-start gap-2 px-3 py-2.5 border-t border-border cursor-pointer">
+										<input
+											type="checkbox"
+											className="mt-0.5 size-3 accent-foreground"
+											checked={
+												mirror
+											}
+											onChange={(
+												e,
+											) =>
+												setMirror(
+													e
+														.target
+														.checked,
+												)
+											}
+										/>
+										<span className="space-y-1">
+											<span className="block text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+												Mirror
+												branches
+												and
+												tags
+												back
+												to
+												GitHub
+											</span>
+											<span className="block text-[11px] text-muted-foreground">
+												Keeps
+												the
+												GitHub
+												repository
+												up
+												to
+												date
+												so
+												its
+												Actions
+												and
+												deploy
+												hooks
+												keep
+												firing.
+												Issues
+												and
+												pull
+												requests
+												are
+												not
+												mirrored,
+												and
+												this
+												needs
+												the
+												GitHub
+												App
+												installed
+												on
+												the
+												upstream.
+											</span>
+										</span>
+									</label>
+								)}
 								{planCopy[kind].note && (
 									<p className="px-3 py-2.5 text-[11px] text-muted-foreground">
 										{

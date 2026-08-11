@@ -13,6 +13,7 @@ import {
 	EyeOff,
 	GitBranch,
 	Globe,
+	RefreshCw,
 	Hash,
 	GitMerge,
 	Layers,
@@ -57,9 +58,29 @@ interface RepoSettingsProps {
 	 * the backend can really perform, so those settings are GitHub's alone.
 	 */
 	hosted: boolean;
+	/** Where this repository's refs are mirrored, when they are. */
+	mirror: MirrorView | null;
 	repoData: RepoData;
 	branches: string[];
 }
+
+/**
+ * Mirroring is the git backend's job and the upstream it forwards to is fixed
+ * when the repository is created, so this reports rather than configures.
+ */
+export interface MirrorView {
+	upstream: { owner: string; repo: string; url: string };
+	state: "syncing" | "synced" | "failed" | null;
+	error: string | null;
+	syncedAt: string | null;
+}
+
+const MIRROR_STATE_LABELS: Record<"syncing" | "synced" | "failed" | "unknown", string> = {
+	syncing: "syncing",
+	synced: "in sync",
+	failed: "sync failed",
+	unknown: "awaiting first sync",
+};
 
 /* ─── Primitives ─────────────────────────────────────────────── */
 
@@ -103,7 +124,14 @@ function ToggleRow({
 
 /* ─── Main Component ─────────────────────────────────────────── */
 
-export function RepoSettings({ owner, repo, hosted, repoData, branches }: RepoSettingsProps) {
+export function RepoSettings({
+	owner,
+	repo,
+	hosted,
+	mirror,
+	repoData,
+	branches,
+}: RepoSettingsProps) {
 	const router = useRouter();
 
 	// General
@@ -553,6 +581,51 @@ export function RepoSettings({ owner, repo, hosted, repoData, branches }: RepoSe
 					success={topicsSuccess}
 				/>
 			</SectionCard>
+
+			{/* ── Mirroring ──
+			    Reported, not configured: the backend forwards the refs and the
+			    upstream it forwards to was fixed at import. ── */}
+			{mirror && (
+				<SectionCard dashed>
+					<SectionHeader
+						icon={RefreshCw}
+						title="GitHub mirror"
+						description="Branches and tags written here are pushed to GitHub, so its Actions and deploy hooks keep firing. Issues and pull requests are not mirrored."
+					/>
+					<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+						<a
+							href={mirror.upstream.url}
+							target="_blank"
+							rel="noreferrer"
+							className="inline-flex items-center gap-1.5 font-mono text-xs text-foreground/80 hover:underline"
+						>
+							{mirror.upstream.owner}/
+							{mirror.upstream.repo}
+							<ExternalLink className="w-3 h-3" />
+						</a>
+						<span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+							{
+								MIRROR_STATE_LABELS[
+									mirror.state ?? "unknown"
+								]
+							}
+						</span>
+						{mirror.syncedAt && (
+							<span className="text-[10px] font-mono text-muted-foreground/60">
+								last synced{" "}
+								{new Date(
+									mirror.syncedAt,
+								).toLocaleString()}
+							</span>
+						)}
+					</div>
+					{mirror.error && (
+						<p className="mt-2 text-[11px] text-destructive font-mono">
+							{mirror.error}
+						</p>
+					)}
+				</SectionCard>
+			)}
 
 			{/* ── Default Branch ── */}
 			<SectionCard>

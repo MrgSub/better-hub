@@ -34,6 +34,7 @@ import { PRMergePanel } from "@/components/pr/pr-merge-panel";
 import { PRCommentForm } from "@/components/pr/pr-comment-form";
 import { PRReviewForm } from "@/components/pr/pr-review-form";
 import { PRConflictResolver } from "@/components/pr/pr-conflict-resolver";
+import { repositoryAgent } from "@/lib/agents/connection";
 import { PRAuthorDossier } from "@/components/pr/pr-author-dossier";
 import { PRChecksPanel } from "@/components/pr/pr-checks-panel";
 import { PROverviewPanel } from "@/components/pr/pr-overview-panel";
@@ -384,9 +385,12 @@ export default async function PRDetailPage({
 	const highlightData = await highlightPromise;
 
 	const showConflictResolver = sp.resolve === "conflicts" && isOpen;
-	// Only a pull request we own can be resolved by an agent: it needs to commit
-	// through our git backend.
-	const isHosted = showConflictResolver && !!(await hostedRepo(owner, repo));
+	// Only a pull request we own can be resolved by an agent — it needs to commit
+	// through our git backend — and only when whoever owns it has connected one,
+	// so the button is absent rather than offering something that would refuse.
+	const hostedForResolve = showConflictResolver ? await hostedRepo(owner, repo) : null;
+	const canResolveAutomatically =
+		!!hostedForResolve && !!(await repositoryAgent(hostedForResolve.record));
 	const headSha = pr.head.sha;
 	const headBranch = pr.head.ref;
 	const baseSha = pr.base.sha;
@@ -452,7 +456,9 @@ export default async function PRDetailPage({
 							headBranch={pr.head.ref}
 							headRepoOwner={pr.head_repo_owner}
 							headRepoName={pr.head_repo_name}
-							canResolveAutomatically={isHosted}
+							canResolveAutomatically={
+								canResolveAutomatically
+							}
 						/>
 					) : undefined
 				}

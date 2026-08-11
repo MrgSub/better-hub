@@ -1,4 +1,5 @@
 import type { PullRequest } from "@/generated/prisma/client";
+import { repositoryAgent } from "@/lib/agents/connection";
 import { prisma } from "@/lib/db";
 import { GitError, type CommitFileChange } from "@/lib/git/types";
 import type { HostedRepo } from "@/lib/repos/hosted-source";
@@ -56,12 +57,17 @@ export type ResolveResult =
  * A coding agent working in its own checkout (Devin, Cursor) plugs in here: it
  * only has to answer with file contents, and the verification below is what
  * makes trusting it safe.
+ *
+ * Which one answers is the repository owner's choice, and there is no default:
+ * an organization that has connected nothing resolves nothing, because sending
+ * their code to an agent is not a decision this deployment gets to make for
+ * them.
  */
 export async function resolveHostedConflicts(
 	h: HostedRepo,
 	actor: PullAuthor,
 	number: number,
-	agent: ConflictAgent = conflictAgent(),
+	agent?: ConflictAgent,
 ): Promise<ResolveResult> {
 	const permission = await repositoryPermission(h.record, actor.userId);
 	if (permission !== "admin" && permission !== "write") {
@@ -82,6 +88,21 @@ export async function resolveHostedConflicts(
 	// unlikely to be trustworthy anyway, and the bill is real either way.
 	const tooLarge = tooLargeToResolve(conflicted);
 	if (tooLarge) return { ok: false, error: tooLarge };
+
+	if (!agent) {
+		const connection = await repositoryAgent(h.record);
+		if (!connection) {
+			return {
+				ok: false,
+				error: `Automatic conflict resolution is off for ${h.record.owner} — an admin can connect Devin or Cursor in settings`,
+			};
+		}
+		try {
+			agent = conflictAgent(connection);
+		} catch (error) {
+			return { ok: false, error: (error as Error).message };
+		}
+	}
 
 	let resolved: ResolvedFile[];
 	try {

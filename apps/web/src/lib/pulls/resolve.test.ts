@@ -11,8 +11,10 @@ vi.mock("@/lib/db", () => ({
 	},
 }));
 vi.mock("@/lib/repos/registry", () => ({ repositoryPermission: vi.fn() }));
+vi.mock("@/lib/agents/connection", () => ({ repositoryAgent: vi.fn() }));
 vi.mock("./conflicts", () => ({ hostedConflicts: vi.fn() }));
 
+import { repositoryAgent } from "@/lib/agents/connection";
 import { prisma } from "@/lib/db";
 import { repositoryPermission } from "@/lib/repos/registry";
 import { hostedConflicts } from "./conflicts";
@@ -266,6 +268,32 @@ describe("resolveHostedConflicts", () => {
 			ok: false,
 			error: expect.stringContaining("write access"),
 		});
+		expect(git.commitFiles).not.toHaveBeenCalled();
+	});
+
+	it("resolves nothing for a namespace that has connected no agent", async () => {
+		const { repo, git } = hosted("clean");
+		vi.mocked(repositoryAgent).mockResolvedValue(null);
+
+		const result = await resolveHostedConflicts(repo, actor, 7);
+
+		expect(result).toMatchObject({
+			ok: false,
+			error: expect.stringContaining("Automatic conflict resolution is off"),
+		});
+		expect(git.commitFiles).not.toHaveBeenCalled();
+	});
+
+	it("uses the agent the namespace connected when none is passed in", async () => {
+		const { repo, git } = hosted("clean");
+		vi.mocked(repositoryAgent).mockResolvedValue({ provider: "model", apiKey: null });
+
+		const result = await resolveHostedConflicts(repo, actor, 7);
+
+		// The model agent itself is unreachable in a unit test; what matters is
+		// that the connection was consulted and the run was not refused.
+		expect(repositoryAgent).toHaveBeenCalledWith(repo.record);
+		expect(result).toMatchObject({ ok: false });
 		expect(git.commitFiles).not.toHaveBeenCalled();
 	});
 

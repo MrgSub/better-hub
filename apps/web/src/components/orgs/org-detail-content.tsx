@@ -14,6 +14,7 @@ import {
 	Lock,
 	MapPin,
 	Search,
+	Settings,
 	Star,
 	Users,
 } from "lucide-react";
@@ -70,7 +71,16 @@ function formatJoinedDate(value: string | null): string | null {
 	});
 }
 
-export function OrgDetailContent({ org, repos }: { org: OrgDetails; repos: OrgRepo[] }) {
+export function OrgDetailContent({
+	org,
+	repos,
+	canAdminister,
+}: {
+	org: OrgDetails;
+	repos: OrgRepo[];
+	/** Only an admin of the organization here can change its settings. */
+	canAdminister?: boolean;
+}) {
 	const [search, setSearch] = useQueryState("q", parseAsString.withDefault(""));
 	const [filter, setFilter] = useQueryState(
 		"filter",
@@ -151,6 +161,15 @@ export function OrgDetailContent({ org, repos }: { org: OrgDetails; repos: OrgRe
 							>
 								<ExternalLink className="w-3.5 h-3.5" />
 							</a>
+							{canAdminister && (
+								<Link
+									href={`/orgs/${org.login}/settings`}
+									title="Organization settings"
+									className="text-muted-foreground/50 hover:text-foreground transition-colors shrink-0"
+								>
+									<Settings className="w-3.5 h-3.5" />
+								</Link>
+							)}
 						</div>
 						<p className="text-xs text-muted-foreground/60 font-mono mt-0.5">
 							@{org.login}

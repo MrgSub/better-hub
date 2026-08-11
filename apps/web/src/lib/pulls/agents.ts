@@ -1,4 +1,5 @@
 import { generateText } from "ai";
+import type { ResolvedAgentConnection } from "@/lib/agents/connection";
 import { getInternalModel } from "@/lib/billing/ai-models.server";
 import type { ConflictAgent, ResolveRequest, ResolvedFile } from "./resolve";
 import type { ConflictFileData, MergeHunk } from "@/lib/three-way-merge";
@@ -23,8 +24,9 @@ const RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1_000;
 
 const DEVIN_API_URL = "https://api.devin.ai/v1";
-const DEVIN_POLL_MS = 10_000;
-const DEVIN_TIMEOUT_MS = 15 * 60_000;
+const CURSOR_API_URL = "https://api.cursor.com/v1";
+const POLL_MS = 10_000;
+const AGENT_TIMEOUT_MS = 15 * 60_000;
 
 export function conflictSize(files: ConflictFileData[]): number {
 	let bytes = 0;
@@ -205,65 +207,157 @@ async function devinFetch<T>(path: string, key: string, body?: unknown): Promise
  * the API is asynchronous, and a run that never finishes is abandoned rather
  * than left holding the request open forever.
  */
-export const devinAgent: ConflictAgent = {
-	name: "devin",
-	async resolve(request) {
-		const key = process.env.DEVIN_API_KEY;
-		if (!key) throw new Error("DEVIN_API_KEY is not set");
+export function devinAgent(key: string): ConflictAgent {
+	return {
+		name: "devin",
+		async resolve(request) {
+			const session = await devinFetch<DevinSession>("/sessions", key, {
+				prompt: [
+					CONFLICT_MARKER_PROMPT,
+					conflictPrompt(request),
+					"Return the resolved files in structured output as",
+					'{"files": [{"path": "...", "content": "..."}]}.',
+				].join("\n\n"),
+				idempotent: true,
+			});
 
-		const session = await devinFetch<DevinSession>("/sessions", key, {
-			prompt: [
-				CONFLICT_MARKER_PROMPT,
-				conflictPrompt(request),
-				"Return the resolved files in structured output as",
-				'{"files": [{"path": "...", "content": "..."}]}.',
-			].join("\n\n"),
-			idempotent: true,
-		});
+			const deadline = Date.now() + AGENT_TIMEOUT_MS;
+			for (;;) {
+				await sleep(POLL_MS);
+				const state = await devinFetch<DevinSessionState>(
+					`/session/${session.session_id}`,
+					key,
+				);
+				const files = state.structured_output?.files;
+				if (files?.length) {
+					return files
+						.filter(
+							(
+								f,
+							): f is { path: string; content: string } =>
+								typeof f.path === "string" &&
+								typeof f.content === "string",
+						)
+						.map((f) => ({ path: f.path, content: f.content }));
+				}
+				if (
+					state.status_enum === "blocked" ||
+					state.status_enum === "finished"
+				) {
+					// It stopped without structured output; the transcript may still
+					// carry the fenced form the prompt asked for.
+					const text = (state.messages ?? [])
+						.map((m) => m.message ?? "")
+						.join("\n");
+					const parsed = parseFiles(text);
+					if (parsed.length > 0) return parsed;
+					throw new Error(
+						"Devin finished without proposing a resolution",
+					);
+				}
+				if (Date.now() > deadline) {
+					throw new Error("Devin did not finish resolving in time");
+				}
+			}
+		},
+	};
+}
 
-		const deadline = Date.now() + DEVIN_TIMEOUT_MS;
-		for (;;) {
-			await sleep(DEVIN_POLL_MS);
-			const state = await devinFetch<DevinSessionState>(
-				`/session/${session.session_id}`,
-				key,
-			);
-			const files = state.structured_output?.files;
-			if (files?.length) {
-				return files
-					.filter(
-						(f): f is { path: string; content: string } =>
-							typeof f.path === "string" &&
-							typeof f.content === "string",
-					)
-					.map((f) => ({ path: f.path, content: f.content }));
-			}
-			if (state.status_enum === "blocked" || state.status_enum === "finished") {
-				// It stopped without structured output; the transcript may still
-				// carry the fenced form the prompt asked for.
-				const text = (state.messages ?? [])
-					.map((m) => m.message ?? "")
-					.join("\n");
-				const parsed = parseFiles(text);
-				if (parsed.length > 0) return parsed;
-				throw new Error("Devin finished without proposing a resolution");
-			}
-			if (Date.now() > deadline) {
-				throw new Error("Devin did not finish resolving in time");
-			}
-		}
-	},
-};
+interface CursorRun {
+	id: string;
+	status?: string | null;
+	result?: string | null;
+}
+
+interface CursorAgentCreated {
+	agent: { id: string };
+	run: CursorRun;
+}
+
+async function cursorFetch<T>(path: string, key: string, body?: unknown): Promise<T> {
+	const response = await fetch(`${CURSOR_API_URL}${path}`, {
+		method: body ? "POST" : "GET",
+		headers: {
+			Authorization: `Bearer ${key}`,
+			"Content-Type": "application/json",
+		},
+		body: body ? JSON.stringify(body) : undefined,
+	});
+	if (!response.ok) {
+		throw new Error(
+			`Cursor API ${response.status}: ${(await response.text()).slice(0, 200)}`,
+		);
+	}
+	return (await response.json()) as T;
+}
 
 /**
- * Which agent this deployment resolves with. Agent-neutral by construction:
- * adding one is a case here plus an adapter above, and everything downstream —
- * validation, the clean-merge proof, the human approval — is unchanged.
+ * Cursor resolving the conflict in a cloud agent.
+ *
+ * Started with no repository attached, which is what keeps this honest: Cursor
+ * can only clone from GitHub, and the repositories here are ours, so a repo
+ * agent would either fail or work from a stale mirror. Sending the conflicted
+ * text instead needs no clone and no GitHub grant, and the answer is the same
+ * fenced form every other agent replies in.
  */
-export function conflictAgent(name = process.env.CONFLICT_AGENT): ConflictAgent {
-	switch (name) {
+export function cursorAgent(key: string): ConflictAgent {
+	return {
+		name: "cursor",
+		async resolve(request) {
+			const created = await cursorFetch<CursorAgentCreated>("/agents", key, {
+				prompt: {
+					text: [
+						CONFLICT_MARKER_PROMPT,
+						conflictPrompt(request),
+					].join("\n\n"),
+				},
+				name: `Resolve conflicts in ${request.headBranch}`.slice(0, 100),
+			});
+
+			const deadline = Date.now() + AGENT_TIMEOUT_MS;
+			for (;;) {
+				await sleep(POLL_MS);
+				const run = await cursorFetch<CursorRun>(
+					`/agents/${created.agent.id}/runs/${created.run.id}`,
+					key,
+				);
+				if (run.status === "FINISHED") {
+					const parsed = parseFiles(run.result ?? "");
+					if (parsed.length > 0) return parsed;
+					throw new Error(
+						"Cursor finished without proposing a resolution",
+					);
+				}
+				if (
+					run.status === "ERROR" ||
+					run.status === "CANCELLED" ||
+					run.status === "EXPIRED"
+				) {
+					throw new Error(`Cursor run ${run.status.toLowerCase()}`);
+				}
+				if (Date.now() > deadline) {
+					throw new Error("Cursor did not finish resolving in time");
+				}
+			}
+		},
+	};
+}
+
+/**
+ * The agent a connection names. Agent-neutral by construction: adding one is a
+ * case here plus an adapter above, and everything downstream — validation, the
+ * clean-merge proof, the human approval — is unchanged.
+ */
+export function conflictAgent(connection: ResolvedAgentConnection): ConflictAgent {
+	switch (connection.provider) {
 		case "devin":
-			return retrying(devinAgent);
+			if (!connection.apiKey)
+				throw new Error("Devin is connected without an API key");
+			return retrying(devinAgent(connection.apiKey));
+		case "cursor":
+			if (!connection.apiKey)
+				throw new Error("Cursor is connected without an API key");
+			return retrying(cursorAgent(connection.apiKey));
 		default:
 			return retrying(modelAgent);
 	}

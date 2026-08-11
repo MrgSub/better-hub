@@ -2,7 +2,8 @@ import { Settings, ShieldAlert } from "lucide-react";
 import { getRepo, getRepoBranches, extractRepoPermissions } from "@/lib/github";
 import { getServerSession } from "@/lib/auth";
 import { hostedRepo } from "@/lib/repos/hosted-source";
-import { RepoSettings } from "@/components/repo/repo-settings";
+import { type MirrorView, RepoSettings } from "@/components/repo/repo-settings";
+import { mirrorStatus } from "@/lib/repos/mirror";
 
 function Notice({
 	icon: Icon,
@@ -20,6 +21,21 @@ function Notice({
 			<p className="text-xs text-muted-foreground/50 font-mono mt-1">{detail}</p>
 		</div>
 	);
+}
+
+/**
+ * A repository that mirrors nothing has no section to render, which is also why
+ * this is null rather than a mode the page has to explain.
+ */
+function mirrorView(record: Parameters<typeof mirrorStatus>[0]): MirrorView | null {
+	const status = mirrorStatus(record);
+	if (status.mode === "off" || !status.upstream) return null;
+	return {
+		upstream: status.upstream,
+		state: status.state,
+		error: status.error,
+		syncedAt: status.syncedAt?.toISOString() ?? null,
+	};
 }
 
 export default async function SettingsPage({
@@ -75,6 +91,7 @@ export default async function SettingsPage({
 			owner={owner}
 			repo={repo}
 			hosted={hosted !== null}
+			mirror={hosted ? mirrorView(hosted.record) : null}
 			repoData={{
 				name: repoData.name,
 				description: repoData.description ?? null,

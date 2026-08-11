@@ -1,6 +1,6 @@
 import { Octokit } from "@octokit/rest";
 import { getGitProvider } from "@/lib/git";
-import { GitError, type RepoGitInfo, type RepoRef } from "@/lib/git/types";
+import { GitError, type GitErrorCode, type RepoGitInfo, type RepoRef } from "@/lib/git/types";
 import {
 	decideImport,
 	type ImportDecision,
@@ -15,6 +15,7 @@ import {
 	syncOrganizationMembership,
 	upstreamIdentity,
 } from "@/lib/repos/registry";
+import { type MirrorMode, mirrorUpstreamAuth } from "@/lib/repos/mirror";
 import { syncUpstreamMetadata } from "@/lib/repos/upstream-metadata";
 
 export interface UpstreamTarget {
@@ -132,6 +133,12 @@ export interface MigrateInput {
 	/** Destination name; the namespace comes from the import decision. */
 	name: string;
 	defaultBranch: string;
+	/**
+	 * Keep the GitHub repository a mirror of this one. Off unless asked for,
+	 * and only decidable here: the upstream link a backend mirrors through is
+	 * fixed when the repository is created.
+	 */
+	mirror?: boolean;
 }
 
 export interface MigrationResult {
@@ -142,6 +149,14 @@ export interface MigrationResult {
 }
 
 const CLONE_URL_TTL_SECONDS = 3600;
+
+/** How a backend reports an upstream its GitHub App cannot reach. */
+const NO_INSTALLATION_CODES: readonly GitErrorCode[] = [
+	"conflict",
+	"forbidden",
+	"unauthorized",
+	"not_found",
+];
 
 async function resolvePlan(upstream: ResolvedUpstream, actorLogin: string) {
 	const identity = upstreamIdentity(upstream.owner, upstream.name);
@@ -218,30 +233,56 @@ export async function migrateRepository(input: MigrateInput): Promise<MigrationR
 		throw new GitError("conflict", `${target.owner}/${target.repo} already exists`);
 	}
 
-	const repo = await git.createRepo(target, {
-		defaultBranch: input.defaultBranch,
-		...(decision.kind === "fork" && decision.source === "canonical" && canonical
-			? {
-					forkOf: {
-						repo: providerRef(canonical),
-						ref: canonical.defaultBranch,
-					},
-				}
-			: {
-					baseRepo: {
-						provider: "github" as const,
-						owner: input.upstream.owner,
-						name: input.upstream.name,
-						defaultBranch: input.upstream.defaultBranch,
-						auth: input.upstream.private
-							? ("token" as const)
-							: ("public" as const),
-					},
-					...(input.upstream.private
-						? { credential: { password: input.actor.token } }
-						: {}),
-				}),
-	});
+	// A fork copies a repository we already hold, so it has no upstream of its
+	// own to mirror to and nothing to authenticate against.
+	const forkOf =
+		decision.kind === "fork" && decision.source === "canonical" && canonical
+			? { repo: providerRef(canonical), ref: canonical.defaultBranch }
+			: null;
+	const mirrorMode: MirrorMode = !forkOf && input.mirror ? "refs" : "off";
+	const upstreamAuth = mirrorUpstreamAuth(mirrorMode, input.upstream.private);
+
+	const repo = await git
+		.createRepo(target, {
+			defaultBranch: input.defaultBranch,
+			...(forkOf
+				? { forkOf }
+				: {
+						baseRepo: {
+							provider: "github" as const,
+							owner: input.upstream.owner,
+							name: input.upstream.name,
+							defaultBranch: input.upstream.defaultBranch,
+							auth: upstreamAuth,
+						},
+						...(upstreamAuth === "token"
+							? {
+									credential: {
+										password: input
+											.actor
+											.token,
+									},
+								}
+							: {}),
+					}),
+		})
+		.catch((error: unknown) => {
+			// Mirroring reads and writes the upstream through the GitHub App, which
+			// refuses the link unless the App is installed there. Said plainly,
+			// because the fix is a click on GitHub and importing without mirroring
+			// still works.
+			if (
+				upstreamAuth === "installation" &&
+				error instanceof GitError &&
+				NO_INSTALLATION_CODES.includes(error.code)
+			) {
+				throw new GitError(
+					"conflict",
+					`Mirroring ${input.upstream.owner}/${input.upstream.name} needs our GitHub App installed on it. Install it and try again, or import without mirroring.`,
+				);
+			}
+			throw error;
+		});
 
 	const organizationId =
 		decision.kind === "create" && input.upstream.ownerType === "Organization"
@@ -263,6 +304,7 @@ export async function migrateRepository(input: MigrateInput): Promise<MigrationR
 			isPrivate: input.upstream.private,
 			sizeKb: input.upstream.sizeKb,
 		},
+		mirrorMode,
 		...(decision.kind === "create" ? { upstream: identity } : {}),
 		...(organizationId ? { organizationId } : {}),
 		...(decision.kind === "fork" && decision.source === "canonical" && canonical

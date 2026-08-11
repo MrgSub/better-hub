@@ -54,6 +54,7 @@ export async function POST(request: Request) {
 		repo?: string;
 		name?: string;
 		defaultBranch?: string;
+		mirror?: boolean;
 	};
 	const target = parseRepoInput(body.repo ?? "");
 	if (!target) return Response.json({ error: "Invalid repository" }, { status: 400 });
@@ -72,6 +73,7 @@ export async function POST(request: Request) {
 			actor: credentials,
 			name: body.name?.trim() || upstream.name,
 			defaultBranch: body.defaultBranch?.trim() || upstream.defaultBranch,
+			mirror: body.mirror === true,
 		});
 		return Response.json(result);
 	} catch (error) {

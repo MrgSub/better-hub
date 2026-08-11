@@ -1,6 +1,6 @@
 "use server";
 
-import { getOctokit, getAuthenticatedUser } from "@/lib/github";
+import { getAuthenticatedUser, upstreamOctokit } from "@/lib/github";
 import { hostedRepo } from "@/lib/repos/hosted-source";
 import { getErrorMessage } from "@/lib/utils";
 
@@ -37,7 +37,7 @@ export async function getReactionUsers(
 ): Promise<{ users: ReactionWithId[]; error?: string }> {
 	if (await hostedRepo(owner, repo)) return { users: [] };
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { users: [], error: "Not authenticated" };
 
 	try {
@@ -88,7 +88,7 @@ export async function addReaction(
 	if (await hostedRepo(owner, repo))
 		return { success: false, error: HOSTED_REACTIONS_UNSUPPORTED };
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { success: false, error: "Not authenticated" };
 
 	try {
@@ -132,7 +132,7 @@ export async function removeReaction(
 	if (await hostedRepo(owner, repo))
 		return { success: false, error: HOSTED_REACTIONS_UNSUPPORTED };
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { success: false, error: "Not authenticated" };
 
 	try {

@@ -1,15 +1,9 @@
 "use server";
 
-import { getOctokit, getGitHubToken } from "@/lib/github";
+import { getGitHubToken, upstreamOctokit } from "@/lib/github";
 import { renderMarkdownToHtml } from "@/components/shared/markdown-renderer";
 import { setCachedReadmeHtml } from "@/lib/readme-cache";
-import {
-	hostedBranches,
-	hostedButHidden,
-	hostedReadme,
-	hostedRepo,
-	hostedTags,
-} from "@/lib/repos/hosted-source";
+import { hostedBranches, hostedReadme, hostedRepo, hostedTags } from "@/lib/repos/hosted-source";
 import { parseLanguages } from "@/lib/repos/upstream-metadata";
 import {
 	setCachedRepoLanguages,
@@ -19,18 +13,6 @@ import {
 	type ContributorAvatar,
 	type BranchRef,
 } from "@/lib/repo-data-cache";
-
-/**
- * GitHub, for a repository that is GitHub's to answer for.
- *
- * The hosted branch of each read below is skipped both when GitHub still hosts
- * the repository and when it is ours but not this viewer's, and only the first
- * of those may go upstream: the second would answer a read about our repository
- * with whatever repository carries the same name over there.
- */
-async function upstreamOctokit(owner: string, repo: string) {
-	return (await hostedButHidden(owner, repo)) ? null : await getOctokit();
-}
 
 /** Hosted repos read their README from our git backend; the rest from GitHub. */
 async function readReadme(owner: string, repo: string, branch: string): Promise<string | null> {

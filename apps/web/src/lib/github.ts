@@ -1296,7 +1296,7 @@ export async function isBranchBehindBase(
 		}
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return false;
 	try {
 		const headPart =
@@ -1326,10 +1326,11 @@ export async function getCompareLinkStatus(params: {
 	baseBranch: string;
 	headBranch: string;
 }): Promise<CompareLinkStatus | null> {
-	const octokit = await getOctokit();
+	const { baseOwner, baseRepo, headOwner, headRepo, baseBranch, headBranch } = params;
+
+	const octokit = await upstreamOctokit(baseOwner, baseRepo);
 	if (!octokit) return null;
 
-	const { baseOwner, baseRepo, headOwner, headRepo, baseBranch, headBranch } = params;
 	const headRef = `${headOwner}:${headBranch}`;
 
 	let aheadBy = 0;
@@ -2578,6 +2579,19 @@ export async function getOctokit(): Promise<Octokit | null> {
 	return authCtx?.octokit ?? null;
 }
 
+/**
+ * GitHub, for a repository that is GitHub's to answer for.
+ *
+ * The hosted branch of a read or write is skipped both when GitHub still hosts
+ * the repository and when the repository is ours but not this viewer's, and
+ * only the first of those may go upstream: the second would let a request about
+ * our repository reach whatever repository carries the same name over there —
+ * answering with its contents, or worse, writing to it.
+ */
+export async function upstreamOctokit(owner: string, repo: string): Promise<Octokit | null> {
+	return (await hostedButHidden(owner, repo)) ? null : await getOctokit();
+}
+
 export async function getAuthenticatedUser() {
 	const authCtx = await getGitHubAuthContext();
 	return authCtx?.githubUser ?? null;
@@ -2983,7 +2997,7 @@ export async function getRepoReleases(owner: string, repo: string) {
 }
 
 export async function getRepoReleasesPage(owner: string, repo: string, page: number) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return [];
 	try {
 		const { data } = await octokit.repos.listReleases({
@@ -2999,7 +3013,7 @@ export async function getRepoReleasesPage(owner: string, repo: string, page: num
 }
 
 export async function getRepoTagsPage(owner: string, repo: string, page: number) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return [];
 	try {
 		const { data } = await octokit.repos.listTags({ owner, repo, per_page: 100, page });
@@ -3959,7 +3973,7 @@ export async function getCrossReferences(
 	// about pull requests that only exist here.
 	if (await hostedRepo(owner, repo)) return [];
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return [];
 
 	try {
@@ -4064,7 +4078,7 @@ export async function getIssueTimelineEvents(
 	repo: string,
 	issueNumber: number,
 ): Promise<IssueTimelineEvent[]> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return [];
 
 	try {
@@ -5776,7 +5790,7 @@ export async function enrichPRsWithCheckStatus(
 	repo: string,
 	prs: { number: number; head: { sha: string } }[],
 ): Promise<Map<number, CheckStatus>> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return new Map();
 
 	const results = await Promise.allSettled(
@@ -6244,7 +6258,7 @@ export async function getRepoSecurityTabData(
 	repo: string,
 	perPage = 20,
 ): Promise<RepoSecurityTabData | null> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return null;
 
 	const [repoResult, reports, dependabot, secretScanning] = await Promise.all([
@@ -6406,7 +6420,7 @@ export async function getRepositoryAdvisory(
 	repo: string,
 	ghsaId: string,
 ): Promise<SecurityAdvisoryDetail | null> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return null;
 
 	try {
@@ -6487,7 +6501,7 @@ export async function getRepoWorkflowRuns(owner: string, repo: string, perPage =
 }
 
 export async function getWorkflowRun(owner: string, repo: string, runId: number) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return null;
 	const { data } = await octokit.actions.getWorkflowRun({
 		owner,
@@ -6556,7 +6570,7 @@ export async function getWorkflowRun(owner: string, repo: string, runId: number)
 }
 
 export async function getWorkflowRunJobs(owner: string, repo: string, runId: number) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return [];
 	const { data } = await octokit.actions.listJobsForWorkflowRun({
 		owner,
@@ -6705,7 +6719,7 @@ export async function getRepoContributorStats(
 	owner: string,
 	repo: string,
 ): Promise<ContributorStats[]> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return [];
 
 	try {
@@ -6739,7 +6753,7 @@ export async function getCommitActivity(
 	owner: string,
 	repo: string,
 ): Promise<CommitActivityWeek[]> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return [];
 
 	try {
@@ -6770,7 +6784,7 @@ export interface CodeFrequencyWeek {
 }
 
 export async function getCodeFrequency(owner: string, repo: string): Promise<CodeFrequencyWeek[]> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return [];
 
 	try {
@@ -6801,7 +6815,7 @@ export async function getWeeklyParticipation(
 	owner: string,
 	repo: string,
 ): Promise<WeeklyParticipation | null> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return null;
 
 	try {
@@ -6824,7 +6838,7 @@ export async function getWeeklyParticipation(
 }
 
 export async function getLanguages(owner: string, repo: string): Promise<Record<string, number>> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return {};
 
 	try {
@@ -7185,7 +7199,7 @@ export async function getRepoOverviewData(
 }
 
 export async function getRepoEvents(owner: string, repo: string, perPage = 30) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return [];
 
 	try {
@@ -7315,7 +7329,7 @@ export async function getRepoCommits(
 		);
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return [];
 	try {
 		const { data } = await octokit.repos.listCommits({
@@ -7342,7 +7356,7 @@ export async function getCommit(owner: string, repo: string, ref: string) {
 		>(await hostedCommit(hosted, ref));
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return null;
 	try {
 		const { data } = await octokit.repos.getCommit({ owner, repo, ref });
@@ -7584,7 +7598,7 @@ export async function getForkSyncStatus(
 	repo: string,
 	defaultBranch: string,
 ): Promise<ForkSyncStatus | null> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return null;
 
 	try {

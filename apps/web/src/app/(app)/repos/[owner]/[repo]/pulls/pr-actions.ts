@@ -2,6 +2,7 @@
 
 import {
 	getOctokit,
+	upstreamOctokit,
 	getGitHubToken,
 	getAuthenticatedUser,
 	invalidatePullRequestCache,
@@ -79,7 +80,7 @@ export async function updatePRBaseBranch(
 	pullNumber: number,
 	base: string,
 ) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -102,7 +103,7 @@ export async function renamePullRequest(
 	pullNumber: number,
 	title: string,
 ) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -199,7 +200,7 @@ export async function mergePullRequest(
 		return { success: true, restacked: result.restacked };
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -233,7 +234,7 @@ export async function closePullRequest(owner: string, repo: string, pullNumber: 
 		return { success: true };
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -265,7 +266,7 @@ export async function reopenPullRequest(owner: string, repo: string, pullNumber:
 		return { success: true };
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -296,7 +297,7 @@ export async function updatePRBranch(owner: string, repo: string, pullNumber: nu
 		return { success: true };
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -313,7 +314,7 @@ export async function updatePRBranch(owner: string, repo: string, pullNumber: nu
 }
 
 export async function convertPRToDraft(owner: string, repo: string, pullNumber: number) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -391,7 +392,7 @@ export async function submitPRReview(
 	event: ReviewEvent,
 	body?: string,
 ) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -410,7 +411,7 @@ export async function submitPRReview(
 }
 
 export async function addPRComment(owner: string, repo: string, pullNumber: number, body: string) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -433,7 +434,7 @@ export async function deletePRComment(
 	pullNumber: number,
 	commentId: number,
 ) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -461,7 +462,7 @@ export async function addPRReviewComment(
 	startLine?: number,
 	startSide?: "LEFT" | "RIGHT",
 ) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -498,7 +499,7 @@ export async function commitSuggestion(
 	suggestion: string,
 	commitMessage?: string,
 ) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -554,7 +555,7 @@ export async function commitFileEditOnPR(
 	sha: string,
 	commitMessage: string,
 ) {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	try {
@@ -801,7 +802,7 @@ export async function commitMergeConflictResolution(
 		return { success: true };
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return { error: "Not authenticated" };
 
 	const isFork = !!(headRepoOwner && headRepoOwner !== owner);

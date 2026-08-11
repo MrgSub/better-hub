@@ -2983,10 +2983,15 @@ export async function getRepoReleases(owner: string, repo: string) {
 		fetchRemote: (octokit) => fetchRepoReleasesFromGitHub(octokit, owner, repo),
 	});
 
-	if (releases.length > 0 || !authCtx?.octokit) return releases;
+	if (releases.length > 0 || !authCtx) return releases;
+
+	// Empty is the answer for a repository of ours the viewer may not see, not
+	// a cache miss worth a second attempt at GitHub's same-named repository.
+	const octokit = await upstreamOctokit(owner, repo);
+	if (!octokit) return releases;
 
 	try {
-		const fresh = await fetchRepoReleasesFromGitHub(authCtx.octokit, owner, repo);
+		const fresh = await fetchRepoReleasesFromGitHub(octokit, owner, repo);
 		upsertGithubCacheEntry(authCtx.userId, cacheKey, "repo_releases", fresh).catch(
 			() => {},
 		);
@@ -7102,6 +7107,10 @@ async function fetchRepoPageDataGraphQL(
  * no GitHub round trip and nothing cached from one — including on the
  * background revalidation path, which would otherwise refill GitHub-derived
  * caches for a repo whose truth is ours.
+ *
+ * Null means GitHub still hosts the repository. One of ours the viewer may not
+ * see is not found — the overview describes a repository, so falling through
+ * would describe GitHub's same-named one instead.
  */
 async function hostedPageDataResult(
 	owner: string,
@@ -7109,7 +7118,11 @@ async function hostedPageDataResult(
 	authCtx: GitHubAuthContext,
 ): Promise<RepoPageDataResult | null> {
 	const hosted = await hostedRepo(owner, repo);
-	if (!hosted) return null;
+	if (!hosted) {
+		return (await hostedButHidden(owner, repo))
+			? { success: false, error: "Repository not found" }
+			: null;
+	}
 	return {
 		success: true,
 		data: await hostedPageData(hosted, {

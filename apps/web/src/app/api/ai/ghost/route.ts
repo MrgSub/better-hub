@@ -16,6 +16,7 @@ import { headers } from "next/headers";
 import { embedText } from "@/lib/mixedbread";
 import { rerankResults } from "@/lib/mixedbread";
 import { searchEmbeddings, type ContentType } from "@/lib/embedding-store";
+import { APP_URL } from "@/lib/app-url";
 import { toAppUrl } from "@/lib/github-utils";
 import { getUserSettings } from "@/lib/user-settings-store";
 import { checkUsageLimit } from "@/lib/billing/usage-limit";
@@ -1857,7 +1858,7 @@ ${allDiffs || "(No file changes available)"}${fileListSection}
 - If the user attached a code snippet above, ALWAYS answer about that specific code.
 - Use **getFileContent** to read files whose diffs were omitted above.
 - **NEVER stop mid-task.** Keep calling tools until done. Always provide a complete final response.
-- **IMPORTANT:** When linking to repos, PRs, issues, or users, ALWAYS use this app's URLs (e.g. \`${process.env.NEXT_PUBLIC_APP_URL || ""}/repos/{owner}/{repo}\`), NEVER use github.com URLs.
+- **IMPORTANT:** When linking to repos, PRs, issues, or users, ALWAYS use this app's URLs (e.g. \`${APP_URL}/repos/{owner}/{repo}\`), NEVER use github.com URLs.
 - After any mutation affecting the current page, ALWAYS call **refreshPage**.
 
 ## PR Tools
@@ -1912,7 +1913,7 @@ ${commentsFormatted ? `### Comments\n${commentsFormatted}` : ""}
 - Be concise and specific. Reference file names, line numbers, and show specific code changes.
 - If the user attached a code snippet above, ALWAYS answer about that specific code.
 - **NEVER stop mid-task.** Keep calling tools until done. Always provide a complete final response.
-- **IMPORTANT:** When linking to repos, PRs, issues, or users, ALWAYS use this app's URLs (e.g. \`${process.env.NEXT_PUBLIC_APP_URL || ""}/repos/{owner}/{repo}\`), NEVER use github.com URLs.
+- **IMPORTANT:** When linking to repos, PRs, issues, or users, ALWAYS use this app's URLs (e.g. \`${APP_URL}/repos/{owner}/{repo}\`), NEVER use github.com URLs.
 - After any mutation affecting the current page, ALWAYS call **refreshPage**.
 
 ## Issue Tools
@@ -1959,7 +1960,7 @@ ${inlineContextPrompt}
 - Be concise and helpful. Tool results render as rich UI — do NOT repeat tool output as text.
 - If the user attached a code snippet above, ALWAYS answer about that specific code.
 - **NEVER stop mid-task.** Keep calling tools until done. Always provide a complete final response.
-- **IMPORTANT:** ALWAYS use this app's URLs (e.g. \`${process.env.NEXT_PUBLIC_APP_URL || ""}/repos/{owner}/{repo}\`), NEVER github.com URLs.
+- **IMPORTANT:** ALWAYS use this app's URLs (e.g. \`${APP_URL}/repos/{owner}/{repo}\`), NEVER github.com URLs.
 
 ## Action Rules
 - Destructive actions (delete repo, close issue): ask confirmation. Star/fork: proceed directly.

@@ -9,6 +9,7 @@ import { generateThemeScript } from "@/lib/theme-script";
 import { listThemes } from "@/lib/themes";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { SWRegister } from "@/components/pwa/sw-register";
+import { APP_URL } from "@/lib/app-url";
 import { Analytics } from "@vercel/analytics/next";
 
 const geistSans = Geist({
@@ -26,8 +27,6 @@ const jetbrainsMono = JetBrains_Mono({
 	subsets: ["latin"],
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://orkd.ai";
-
 export const viewport: Viewport = {
 	themeColor: "#000000",
 };
@@ -38,12 +37,12 @@ export const metadata: Metadata = {
 		template: "%s | Orkd",
 	},
 	description: "Re-imagining code collaboration for humans and agents.",
-	metadataBase: new URL(siteUrl),
+	metadataBase: new URL(APP_URL),
 	openGraph: {
 		title: "Orkd",
 		description: "Re-imagining code collaboration for humans and agents.",
 		siteName: "Orkd",
-		url: siteUrl,
+		url: APP_URL,
 		images: [
 			{
 				url: "/og.png",

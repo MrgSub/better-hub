@@ -1,3 +1,5 @@
+import { APP_URL, HAS_CONFIGURED_APP_URL } from "@/lib/app-url";
+
 export const LANGUAGE_COLORS: Record<string, string> = {
 	TypeScript: "#3178c6",
 	JavaScript: "#f1e05a",
@@ -155,16 +157,11 @@ export function buildPrHeadBranchTreeHref({
 	return `/${targetOwner}/${targetRepo}/tree/${headBranch}`;
 }
 
-/**
- * Converts a github.com URL to a full app URL using NEXT_PUBLIC_APP_URL.
- * Falls back to toInternalUrl (relative path) if env is not set.
- */
 export function toAppUrl(htmlUrl: string): string {
 	const internalPath = toInternalUrl(htmlUrl);
 	// If toInternalUrl returned the original URL (couldn't parse), keep it
 	if (internalPath === htmlUrl) return htmlUrl;
-	const appBase = process.env.NEXT_PUBLIC_APP_URL;
-	if (appBase) return `${appBase.replace(/\/$/, "")}${internalPath}`;
+	if (HAS_CONFIGURED_APP_URL) return `${APP_URL.replace(/\/$/, "")}${internalPath}`;
 	return internalPath;
 }
 

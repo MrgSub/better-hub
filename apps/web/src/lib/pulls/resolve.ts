@@ -1,11 +1,10 @@
-import { generateText } from "ai";
 import type { PullRequest } from "@/generated/prisma/client";
-import { getInternalModel } from "@/lib/billing/ai-models.server";
 import { prisma } from "@/lib/db";
 import { GitError, type CommitFileChange } from "@/lib/git/types";
 import type { HostedRepo } from "@/lib/repos/hosted-source";
 import { repositoryPermission } from "@/lib/repos/registry";
-import type { ConflictFileData, MergeHunk } from "@/lib/three-way-merge";
+import type { ConflictFileData } from "@/lib/three-way-merge";
+import { conflictAgent, tooLargeToResolve } from "./agents";
 import type { PullAuthor } from "./create";
 import { hostedConflicts } from "./conflicts";
 import { resolutionBranchName } from "./merge";
@@ -53,79 +52,6 @@ export type ResolveResult =
 	| { ok: true; sha: string; branch: string; paths: string[]; agent: string }
 	| { ok: false; error: string };
 
-const CONFLICT_MARKER_PROMPT = `You resolve git merge conflicts.
-
-Each conflict is given as a file with git conflict markers: <<<<<<< base is the
-branch being merged into, ======= separates, >>>>>>> head is the pull request's
-branch. Combine both intents — keep the base's changes and the pull request's
-changes unless they are genuinely mutually exclusive, in which case prefer the
-pull request's. Never keep a conflict marker, never leave a TODO, never
-reformat or fix unrelated lines, and never drop code from either side that is
-not actually in conflict.
-
-Reply with the full resolved content of every file, each as:
---- FILE: <path>
-<content>
---- END FILE`;
-
-function conflictText(file: ConflictFileData, baseBranch: string, headBranch: string): string {
-	return file.hunks.map((hunk) => hunkText(hunk, baseBranch, headBranch)).join("\n");
-}
-
-function hunkText(hunk: MergeHunk, baseBranch: string, headBranch: string): string {
-	if (hunk.type === "clean") return (hunk.resolvedLines ?? []).join("\n");
-	return [
-		`<<<<<<< ${baseBranch}`,
-		...(hunk.baseLines ?? []),
-		"=======",
-		...(hunk.headLines ?? []),
-		`>>>>>>> ${headBranch}`,
-	].join("\n");
-}
-
-/** Parses the fenced form the prompt asks for, ignoring anything else it says. */
-function parseFiles(text: string): ResolvedFile[] {
-	const files: ResolvedFile[] = [];
-	const pattern = /^--- FILE: (.+)$\n([\s\S]*?)^--- END FILE$/gm;
-	for (const match of text.matchAll(pattern)) {
-		const path = match[1].trim();
-		if (path) files.push({ path, content: match[2].replace(/\n$/, "") });
-	}
-	return files;
-}
-
-/**
- * The default agent: the model the app already runs on, so resolution works
- * with the keys a user has configured rather than a second vendor.
- */
-export const modelAgent: ConflictAgent = {
-	name: "model",
-	async resolve(request) {
-		const { model } = await getInternalModel(request.userId);
-		const conflicted = request.files.filter((f) => f.hasConflicts);
-		const { text } = await generateText({
-			model,
-			system: CONFLICT_MARKER_PROMPT,
-			prompt: [
-				`Pull request: ${request.title}`,
-				request.body ? `Description:\n${request.body}` : "",
-				`Merging ${request.headBranch} into ${request.baseBranch}.`,
-				...conflicted.map(
-					(file) =>
-						`--- FILE: ${file.path}\n${conflictText(
-							file,
-							request.baseBranch,
-							request.headBranch,
-						)}\n--- END FILE`,
-				),
-			]
-				.filter(Boolean)
-				.join("\n\n"),
-		});
-		return parseFiles(text);
-	},
-};
-
 /**
  * A coding agent working in its own checkout (Devin, Cursor) plugs in here: it
  * only has to answer with file contents, and the verification below is what
@@ -135,7 +61,7 @@ export async function resolveHostedConflicts(
 	h: HostedRepo,
 	actor: PullAuthor,
 	number: number,
-	agent: ConflictAgent = modelAgent,
+	agent: ConflictAgent = conflictAgent(),
 ): Promise<ResolveResult> {
 	const permission = await repositoryPermission(h.record, actor.userId);
 	if (permission !== "admin" && permission !== "write") {
@@ -151,6 +77,11 @@ export async function resolveHostedConflicts(
 	const conflicts = await hostedConflicts(h, pull.baseBranch, pull.headBranch);
 	const conflicted = conflicts.files.filter((f) => f.hasConflicts);
 	if (conflicted.length === 0) return { ok: false, error: "There is nothing to resolve" };
+
+	// Refused before an agent is paid for it: past a certain size the answer is
+	// unlikely to be trustworthy anyway, and the bill is real either way.
+	const tooLarge = tooLargeToResolve(conflicted);
+	if (tooLarge) return { ok: false, error: tooLarge };
 
 	let resolved: ResolvedFile[];
 	try {

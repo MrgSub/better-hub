@@ -21,6 +21,7 @@ import { computeContributorScore } from "./contributor-score";
 import { getCachedAuthorDossier, setCachedAuthorDossier } from "./repo-data-cache";
 import {
 	hostedBranches,
+	hostedCommit,
 	hostedCommits,
 	hostedContents,
 	hostedFileContent,
@@ -30,6 +31,7 @@ import {
 	hostedRepoData,
 	hostedTags,
 	hostedTree,
+	upstreamRepoRef,
 } from "./repos/hosted-source";
 import {
 	hostedCompare,
@@ -4231,7 +4233,17 @@ export async function getRepoIssues(
 		fallback: [],
 		jobType: "repo_issues",
 		jobPayload: { owner, repo, state },
-		fetchRemote: (octokit) => fetchRepoIssuesFromGitHub(octokit, owner, repo, state),
+		fetchRemote: async (octokit) => {
+			// Issues are the upstream's, even when the code is ours.
+			const upstream = await upstreamRepoRef(owner, repo);
+			if (!upstream) return [];
+			return fetchRepoIssuesFromGitHub(
+				octokit,
+				upstream.owner,
+				upstream.repo,
+				state,
+			);
+		},
 	});
 }
 
@@ -5170,6 +5182,11 @@ export async function getRepoIssuesWithStats(
 		cursor?: string | null;
 	},
 ): Promise<IssuesPageResult> {
+	// Issues stay upstream, so a repo we host asks about its upstream — and one
+	// without an upstream has none to ask about.
+	const upstream = await upstreamRepoRef(owner, repo);
+	if (!upstream) return EMPTY_ISSUES_PAGE_RESULT;
+
 	const token = await getGitHubToken();
 	if (!token) return EMPTY_ISSUES_PAGE_RESULT;
 
@@ -5203,7 +5220,10 @@ export async function getRepoIssuesWithStats(
 				Authorization: `Bearer ${token}`,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ query, variables: { owner, name: repo } }),
+			body: JSON.stringify({
+				query,
+				variables: { owner: upstream.owner, name: upstream.repo },
+			}),
 		});
 
 		if (!response.ok) return EMPTY_ISSUES_PAGE_RESULT;
@@ -5400,75 +5420,6 @@ export async function getRepoPullRequests(
 		fetchRemote: (octokit) =>
 			fetchRepoPullRequestsFromGitHub(octokit, owner, repo, state),
 	});
-}
-
-export async function enrichPRsWithStats(owner: string, repo: string, prs: { number: number }[]) {
-	if (prs.length === 0)
-		return new Map<
-			number,
-			{ additions: number; deletions: number; changed_files: number }
-		>();
-
-	const token = await getGitHubToken();
-	if (!token)
-		return new Map<
-			number,
-			{ additions: number; deletions: number; changed_files: number }
-		>();
-
-	const prFragments = prs.map(
-		(pr, i) =>
-			`pr${i}: pullRequest(number: ${pr.number}) { number additions deletions changedFiles }`,
-	);
-
-	const query = `query { repository(owner: "${owner}", name: "${repo}") { ${prFragments.join(" ")} } }`;
-
-	try {
-		const response = await fetch("https://api.github.com/graphql", {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${token}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({ query }),
-		});
-
-		if (!response.ok)
-			return new Map<
-				number,
-				{ additions: number; deletions: number; changed_files: number }
-			>();
-
-		const json = await response.json();
-		const repoData = json.data?.repository;
-		if (!repoData)
-			return new Map<
-				number,
-				{ additions: number; deletions: number; changed_files: number }
-			>();
-
-		const map = new Map<
-			number,
-			{ additions: number; deletions: number; changed_files: number }
-		>();
-		for (let i = 0; i < prs.length; i++) {
-			const pr = repoData[`pr${i}`];
-			if (pr) {
-				map.set(pr.number, {
-					additions: pr.additions,
-					deletions: pr.deletions,
-					changed_files: pr.changedFiles,
-				});
-			}
-		}
-		return map;
-	} catch (error) {
-		rethrowKnownGitHubErrors(error);
-		return new Map<
-			number,
-			{ additions: number; deletions: number; changed_files: number }
-		>();
-	}
 }
 
 const PR_LIST_GRAPHQL_STATES = {
@@ -5854,6 +5805,9 @@ export async function batchFetchCheckStatuses(
 	prs: { number: number }[],
 ): Promise<Record<number, CheckStatus>> {
 	if (prs.length === 0) return {};
+	// A pull request of ours has no GitHub checks to roll up, and its number is
+	// ours too — asking GitHub about it would answer for a different one.
+	if (await hostedRepo(owner, repo)) return {};
 
 	const rKey = checkStatusRedisKey(owner, repo);
 	try {
@@ -7375,6 +7329,13 @@ export async function getRepoCommits(
 }
 
 export async function getCommit(owner: string, repo: string, ref: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<
+			Awaited<ReturnType<Octokit["repos"]["getCommit"]>>["data"] | null
+		>(await hostedCommit(hosted, ref));
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return null;
 	try {

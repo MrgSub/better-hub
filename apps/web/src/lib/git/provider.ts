@@ -15,6 +15,7 @@ import type {
 	MergeOptions,
 	MergePreview,
 	MergeResult,
+	MergeStrategy,
 	Page,
 	RepoGitInfo,
 	RepoRef,
@@ -33,6 +34,13 @@ import type {
 export interface GitProvider {
 	/** Identifies the adapter, for logging and `Repository.gitBackend`. */
 	readonly backend: string;
+
+	/**
+	 * The merge strategies this backend really performs. Callers offer only
+	 * these, so a backend without a rebase primitive declines it instead of
+	 * being handed one and answering with something else.
+	 */
+	readonly mergeStrategies: readonly MergeStrategy[];
 
 	getRepo(r: RepoRef): Promise<RepoGitInfo | null>;
 	listRepos(q?: string, cursor?: string): Promise<Page<RepoGitInfo>>;

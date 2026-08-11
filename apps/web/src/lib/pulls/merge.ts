@@ -1,7 +1,8 @@
 import type { PullRequest } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import type { MergeConflict } from "@/lib/git/types";
+import type { MergeConflict, MergeStrategy as ProviderMergeStrategy } from "@/lib/git/types";
 import type { HostedRepo } from "@/lib/repos/hosted-source";
+import { RepoBusyError, withRepoLock } from "@/lib/repos/lock";
 import { repositoryPermission } from "@/lib/repos/registry";
 import type { PullAuthor } from "./create";
 
@@ -11,10 +12,12 @@ import type { PullAuthor } from "./create";
  * The record is ours and the refs are the backend's, so merging is three steps
  * that must not drift apart: prove the branches still look the way the reviewer
  * saw them, move the ref through `GitProvider`, then write the outcome down.
- * Concurrent merges into one branch are serialised on a Postgres advisory lock
- * keyed by repository, and the backend is additionally given the base sha we
- * expect — so a merge racing another one is refused rather than silently built
- * on a tree nobody reviewed.
+ * Concurrent merges into one branch are serialised on a repository lease, and
+ * the backend is additionally given the base sha we expect — so a merge racing
+ * another one is refused rather than silently built on a tree nobody reviewed.
+ * The lease only queues the callers; the expected sha is what makes the race
+ * safe, which matters because no lock can be held across a backend that has
+ * already moved a ref.
  */
 
 export type MergeStrategy = "merge" | "squash" | "rebase";
@@ -38,23 +41,28 @@ export interface RestackOutcome {
 }
 
 /**
- * Serialises merges per repository so two people landing into one branch queue
- * instead of racing. Postgres keys advisory locks by number, so the id is
- * hashed, and holding it in a transaction releases it however the merge ends.
- * The work inside deliberately uses the normal client rather than this
- * transaction: the ref moves in the backend regardless of what Postgres does,
- * so rolling the record back would hide a merge that actually happened.
+ * What to ask the backend for. A rebase is only requested from a backend that
+ * really rebases; anywhere else the closest honest thing is a fast-forward,
+ * and the caller above tells the user which one they are getting.
  */
-async function withRepoLock<T>(repositoryId: string, run: () => Promise<T>): Promise<T> {
-	return prisma.$transaction(
-		async (tx) => {
-			await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${repositoryId}))`;
-			return run();
-		},
-		// A merge is several backend round trips plus a restack walk, which is
-		// far longer than the default interactive-transaction budget.
-		{ maxWait: 30_000, timeout: 120_000 },
-	);
+function providerStrategy(h: HostedRepo, strategy: MergeStrategy): ProviderMergeStrategy {
+	if (strategy !== "rebase") return strategy;
+	return h.git.mergeStrategies.includes("rebase") ? "rebase" : "fast_forward";
+}
+
+/** Whether this repository can offer "Rebase and merge" at all. */
+export function hostedMergeMethods(h: HostedRepo): {
+	merge: boolean;
+	squash: boolean;
+	rebase: boolean;
+} {
+	const strategies = h.git.mergeStrategies;
+	return {
+		merge: strategies.includes("merge"),
+		squash: strategies.includes("squash"),
+		// A fast-forward is not a rebase, so it is not offered as one.
+		rebase: strategies.includes("rebase"),
+	};
 }
 
 function gitActor(actor: PullAuthor) {
@@ -94,131 +102,154 @@ export async function mergeHostedPull(
 
 	const strategy = input.strategy ?? "merge";
 
-	return withRepoLock(h.record.id, async () => {
-		const pull = await openPull(h.record.id, input.number);
-		if (!pull) return { ok: false, error: "Pull request not found" };
-		if (pull.state !== "open")
-			return { ok: false, error: "This pull request is not open" };
-		if (pull.draft)
-			return { ok: false, error: "A draft pull request cannot be merged" };
+	try {
+		return await withRepoLock(h.record.id, async () => {
+			const pull = await openPull(h.record.id, input.number);
+			if (!pull) return { ok: false, error: "Pull request not found" };
+			if (pull.state !== "open")
+				return { ok: false, error: "This pull request is not open" };
+			if (pull.draft)
+				return {
+					ok: false,
+					error: "A draft pull request cannot be merged",
+				};
 
-		// The reviewer approved a particular head; if it moved since, the diff
-		// on screen is not the diff that would land.
-		const branches = await h.git.listBranches(h.ref);
-		const head = branches.items.find((b) => b.name === pull.headBranch);
-		const base = branches.items.find((b) => b.name === pull.baseBranch);
-		if (!head)
-			return { ok: false, error: `Branch ${pull.headBranch} no longer exists` };
-		if (!base)
-			return { ok: false, error: `Branch ${pull.baseBranch} no longer exists` };
+			// The reviewer approved a particular head; if it moved since, the diff
+			// on screen is not the diff that would land.
+			const branches = await h.git.listBranches(h.ref);
+			const head = branches.items.find((b) => b.name === pull.headBranch);
+			const base = branches.items.find((b) => b.name === pull.baseBranch);
+			if (!head)
+				return {
+					ok: false,
+					error: `Branch ${pull.headBranch} no longer exists`,
+				};
+			if (!base)
+				return {
+					ok: false,
+					error: `Branch ${pull.baseBranch} no longer exists`,
+				};
 
-		if (head.sha !== pull.headSha) {
-			// Record the new tip so the page the reviewer reloads shows the diff
-			// that would now land, then let them merge that one deliberately.
-			await prisma.pullRequest.update({
-				where: { id: pull.id },
-				data: { headSha: head.sha },
+			if (head.sha !== pull.headSha) {
+				// Record the new tip so the page the reviewer reloads shows the diff
+				// that would now land, then let them merge that one deliberately.
+				await prisma.pullRequest.update({
+					where: { id: pull.id },
+					data: { headSha: head.sha },
+				});
+				return {
+					ok: false,
+					error: `${pull.headBranch} has new commits since this diff was loaded — review them and merge again`,
+				};
+			}
+
+			const preview = await h.git.previewMerge(
+				h.ref,
+				pull.baseBranch,
+				pull.headBranch,
+			);
+			// A recorded resolution is a branch off the base carrying the merged tree,
+			// so it is what lands when the head itself cannot.
+			const source = await mergeSource(h, pull, preview.status === "conflicted");
+			if (!source) {
+				await recordConflict(pull, actor, preview.conflicts);
+				return {
+					ok: false,
+					error: `${pull.headBranch} conflicts with ${pull.baseBranch}`,
+					conflicts: preview.conflicts,
+				};
+			}
+
+			// A backend with no rebase primitive performs a fast-forward
+			// instead: also linear, but only possible once the head already
+			// carries the base — and refused, rather than quietly turned into
+			// a merge commit, when it does not.
+			const wireStrategy = providerStrategy(h, strategy);
+			if (wireStrategy === "fast_forward" && preview.mergeBaseSha !== base.sha) {
+				return {
+					ok: false,
+					error: `${pull.headBranch} is behind ${pull.baseBranch} — update the branch first: ${h.git.backend} can only fast-forward, not rebase`,
+				};
+			}
+
+			// Counted before the restack re-targets the children off this branch.
+			const stackedOnHead = await prisma.pullRequest.count({
+				where: {
+					repositoryId: h.record.id,
+					state: "open",
+					baseBranch: pull.headBranch,
+					id: { not: pull.id },
+				},
 			});
-			return {
-				ok: false,
-				error: `${pull.headBranch} has new commits since this diff was loaded — review them and merge again`,
-			};
-		}
 
-		const preview = await h.git.previewMerge(h.ref, pull.baseBranch, pull.headBranch);
-		// A recorded resolution is a branch off the base carrying the merged tree,
-		// so it is what lands when the head itself cannot.
-		const source = await mergeSource(h, pull, preview.status === "conflicted");
-		if (!source) {
-			await recordConflict(pull, actor, preview.conflicts);
-			return {
-				ok: false,
-				error: `${pull.headBranch} conflicts with ${pull.baseBranch}`,
-				conflicts: preview.conflicts,
-			};
-		}
+			const result = await h.git.merge(h.ref, pull.baseBranch, source, {
+				author: gitActor(actor),
+				strategy: wireStrategy,
+				message: mergeMessage(pull, input),
+				expectedBaseSha: base.sha,
+			});
+			if (!result.merged && result.status === "conflicted") {
+				await recordConflict(pull, actor, result.conflicts);
+				return {
+					ok: false,
+					error: `${pull.headBranch} conflicts with ${pull.baseBranch}`,
+					conflicts: result.conflicts,
+				};
+			}
 
-		// The backend has no rebase: `ff_only` is the honest equivalent, and it
-		// only exists once the head already carries the base.
-		if (strategy === "rebase" && preview.mergeBaseSha !== base.sha) {
-			return {
-				ok: false,
-				error: `${pull.headBranch} is behind ${pull.baseBranch} — update the branch before rebasing`,
-			};
-		}
+			if (source !== pull.headBranch) {
+				await h.git.deleteBranch(h.ref, source).catch(() => {});
+			}
 
-		// Counted before the restack re-targets the children off this branch.
-		const stackedOnHead = await prisma.pullRequest.count({
-			where: {
-				repositoryId: h.record.id,
-				state: "open",
-				baseBranch: pull.headBranch,
-				id: { not: pull.id },
-			},
-		});
-
-		const result = await h.git.merge(h.ref, pull.baseBranch, source, {
-			author: gitActor(actor),
-			strategy,
-			message: mergeMessage(pull, input),
-			expectedBaseSha: base.sha,
-		});
-		if (!result.merged && result.status === "conflicted") {
-			await recordConflict(pull, actor, result.conflicts);
-			return {
-				ok: false,
-				error: `${pull.headBranch} conflicts with ${pull.baseBranch}`,
-				conflicts: result.conflicts,
-			};
-		}
-
-		if (source !== pull.headBranch) {
-			await h.git.deleteBranch(h.ref, source).catch(() => {});
-		}
-
-		const merged = await prisma.pullRequest.update({
-			where: { id: pull.id },
-			data: {
-				state: "merged",
-				mergeSha: result.sha,
-				headSha: head.sha,
-				baseSha: result.sha ?? base.sha,
-				mergedAt: new Date(),
-				mergedById: actor.userId,
-				closedAt: new Date(),
-				resolutionBranch: null,
-				resolutionSha: null,
-				events: {
-					create: {
-						kind: "merged",
-						actorId: actor.userId,
-						actorLogin: actor.login,
-						payloadJson: JSON.stringify({
-							strategy,
-							sha: result.sha,
-							headSha: head.sha,
-							...(source === pull.headBranch
-								? {}
-								: {
-										resolvedBy: pull.resolutionBy,
-									}),
-						}),
+			const merged = await prisma.pullRequest.update({
+				where: { id: pull.id },
+				data: {
+					state: "merged",
+					mergeSha: result.sha,
+					headSha: head.sha,
+					baseSha: result.sha ?? base.sha,
+					mergedAt: new Date(),
+					mergedById: actor.userId,
+					closedAt: new Date(),
+					resolutionBranch: null,
+					resolutionSha: null,
+					events: {
+						create: {
+							kind: "merged",
+							actorId: actor.userId,
+							actorLogin: actor.login,
+							payloadJson: JSON.stringify({
+								strategy,
+								sha: result.sha,
+								headSha: head.sha,
+								...(source === pull.headBranch
+									? {}
+									: {
+											resolvedBy: pull.resolutionBy,
+										}),
+							}),
+						},
 					},
 				},
-			},
+			});
+
+			const restacked = await restackChildren(h, actor, merged, pull.baseBranch);
+
+			// A branch another pull request was stacked on has to outlive this merge:
+			// a child that failed to restack is still explained by it, and one that
+			// succeeded may still be checked out by a reviewer.
+			if (input.deleteBranch && stackedOnHead === 0) {
+				await h.git.deleteBranch(h.ref, pull.headBranch).catch(() => {});
+			}
+
+			return { ok: true, sha: result.sha, restacked };
 		});
-
-		const restacked = await restackChildren(h, actor, merged, pull.baseBranch);
-
-		// A branch another pull request was stacked on has to outlive this merge:
-		// a child that failed to restack is still explained by it, and one that
-		// succeeded may still be checked out by a reviewer.
-		if (input.deleteBranch && stackedOnHead === 0) {
-			await h.git.deleteBranch(h.ref, pull.headBranch).catch(() => {});
-		}
-
-		return { ok: true, sha: result.sha, restacked };
-	});
+	} catch (e) {
+		// Queuing behind another merge is an outcome the sheet can explain, not
+		// a crash.
+		if (e instanceof RepoBusyError) return { ok: false, error: e.message };
+		throw e;
+	}
 }
 
 /** Branch names are derived, so a repeated attempt reuses one name per tip. */
@@ -387,11 +418,20 @@ export async function updateHostedPullBranch(
 	if (!pull) return { ok: false, error: "Pull request not found" };
 	if (pull.state !== "open") return { ok: false, error: "This pull request is not open" };
 
-	const result = await h.git.merge(h.ref, pull.headBranch, pull.baseBranch, {
-		author: gitActor(actor),
-		strategy: "merge",
-		message: `Merge ${pull.baseBranch} into ${pull.headBranch}`,
+	// Moves the head ref, so it queues behind a merge of the same repository.
+	const result = await withRepoLock(h.record.id, () =>
+		h.git.merge(h.ref, pull.headBranch, pull.baseBranch, {
+			author: gitActor(actor),
+			strategy: "merge",
+			message: `Merge ${pull.baseBranch} into ${pull.headBranch}`,
+		}),
+	).catch((e: unknown) => {
+		if (e instanceof RepoBusyError) return null;
+		throw e;
 	});
+	if (!result) {
+		return { ok: false, error: "Another write to this repository is in progress" };
+	}
 	if (!result.merged && result.status === "conflicted") {
 		await recordConflict(pull, actor, result.conflicts);
 		return { ok: false, error: `${pull.baseBranch} conflicts with ${pull.headBranch}` };

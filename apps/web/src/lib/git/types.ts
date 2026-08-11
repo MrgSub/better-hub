@@ -182,11 +182,20 @@ export interface MergePreview {
 	conflicts: MergeConflict[];
 }
 
+/**
+ * How a merge is performed. `fast_forward` and `rebase` both produce a linear
+ * history, but they are not the same promise: a fast-forward only moves the
+ * base pointer to a head that already carries it, while a rebase rewrites the
+ * head's commits onto the base. A backend that can only do the former must say
+ * so rather than quietly substituting it — see `GitProvider.mergeStrategies`.
+ */
+export type MergeStrategy = "merge" | "squash" | "fast_forward" | "rebase";
+
 export interface MergeOptions {
 	/** Required: a merge commit needs an author even when the caller has no message. */
 	author: GitActor;
 	message?: string;
-	strategy?: "merge" | "squash" | "rebase";
+	strategy?: MergeStrategy;
 	/** Optimistic-concurrency guard: refuse the merge if base moved. */
 	expectedBaseSha?: string;
 }

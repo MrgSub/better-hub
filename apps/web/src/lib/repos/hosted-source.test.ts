@@ -13,6 +13,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+	hostedCommit,
 	hostedCommits,
 	hostedContents,
 	hostedFileContent,
@@ -20,6 +21,7 @@ import {
 	hostedRepoData,
 	type HostedRepo,
 } from "./hosted-source";
+import { providerRef } from "./registry";
 
 function record(overrides: Partial<Repository> = {}): Repository {
 	return {
@@ -58,7 +60,11 @@ function record(overrides: Partial<Repository> = {}): Repository {
 function repo(git: Partial<GitProvider>, row: Repository = record()): HostedRepo {
 	return {
 		ref: { owner: "adam", repo: "hello" },
-		git: git as GitProvider,
+		git: {
+			backend: "code-storage",
+			mergeStrategies: ["merge", "squash", "fast_forward"],
+			...git,
+		} as GitProvider,
 		defaultBranch: "main",
 		record: row,
 	};
@@ -277,5 +283,79 @@ describe("hostedCommits", () => {
 		});
 
 		expect(await hostedCommits(repo({ listCommits }), undefined, 3, 30)).toEqual([]);
+	});
+});
+
+describe("hostedCommit", () => {
+	const patch = ["@@ -1,2 +1,3 @@", " keep", "-gone", "+added", "+also"].join("\n");
+
+	it("reads the commit and its diff from the backend, never GitHub", async () => {
+		const getCommit = vi.fn().mockResolvedValue({ ...commit("abc"), stats: null });
+		const getCommitDiff = vi
+			.fn()
+			.mockResolvedValue([
+				{ path: "a.ts", status: "M", patch, truncated: false, bytes: 20 },
+			]);
+
+		const detail = await hostedCommit(repo({ getCommit, getCommitDiff }), "abc");
+
+		expect(getCommit).toHaveBeenCalledWith(expect.anything(), "abc");
+		expect(detail?.sha).toBe("abc");
+		// Derived from the patch, because the backend reported no stats.
+		expect(detail?.stats).toEqual({ total: 3, additions: 2, deletions: 1 });
+		expect(detail?.files[0]).toMatchObject({
+			filename: "a.ts",
+			status: "modified",
+			additions: 2,
+			deletions: 1,
+			changes: 3,
+		});
+	});
+
+	it("prefers the backend's own stats over counting the patch", async () => {
+		const detail = await hostedCommit(
+			repo({
+				getCommit: vi.fn().mockResolvedValue({
+					...commit("abc"),
+					stats: { files: 1, additions: 9, deletions: 4 },
+				}),
+				getCommitDiff: vi.fn().mockResolvedValue([
+					{
+						path: "a.ts",
+						status: "M",
+						patch,
+						truncated: false,
+						bytes: 20,
+					},
+				]),
+			}),
+			"abc",
+		);
+		expect(detail?.stats).toEqual({ total: 13, additions: 9, deletions: 4 });
+	});
+
+	it("is null for a sha the backend does not have, so the page can say so", async () => {
+		const getCommitDiff = vi.fn();
+		const detail = await hostedCommit(
+			repo({ getCommit: vi.fn().mockResolvedValue(null), getCommitDiff }),
+			"nope",
+		);
+		expect(detail).toBeNull();
+		expect(getCommitDiff).not.toHaveBeenCalled();
+	});
+});
+
+describe("providerRef", () => {
+	it("addresses the backend by the id it assigned, not our display name", () => {
+		// Display casing drifted after the import; the backend never saw it.
+		const drifted = record({ owner: "Adam", name: "Hello", gitRepoId: "adam/hello" });
+		expect(providerRef(drifted)).toEqual({ owner: "adam", repo: "hello" });
+	});
+
+	it("falls back to the display pair for a row written before ids were stored", () => {
+		expect(providerRef(record({ gitRepoId: "" }))).toEqual({
+			owner: "adam",
+			repo: "hello",
+		});
 	});
 });

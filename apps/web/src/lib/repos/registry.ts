@@ -1,6 +1,6 @@
 import type { Repository } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import type { RepoGitInfo } from "@/lib/git/types";
+import type { RepoGitInfo, RepoRef } from "@/lib/git/types";
 import type { UpstreamPermission } from "./policy";
 
 /**
@@ -22,6 +22,19 @@ export function upstreamIdentity(
 	host = "github.com",
 ): UpstreamIdentity {
 	return { host: host.toLowerCase(), owner: owner.toLowerCase(), name: name.toLowerCase() };
+}
+
+/**
+ * How the backend knows this repository, as opposed to how we display it.
+ *
+ * The backend named it at creation time and recorded that name in
+ * `gitRepoId`; our `owner`/`name` are display coordinates that a rename or a
+ * casing fix can move underneath it. Reads therefore go by the recorded id,
+ * falling back to the display pair for rows written before it was stored.
+ */
+export function providerRef(record: Repository): RepoRef {
+	const [owner, repo] = record.gitRepoId.split("/");
+	return owner && repo ? { owner, repo } : { owner: record.owner, repo: record.name };
 }
 
 export function findCanonicalRepository(upstream: UpstreamIdentity): Promise<Repository | null> {

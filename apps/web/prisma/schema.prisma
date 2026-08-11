@@ -197,6 +197,21 @@ model Repository {
   @@map("repositories")
 }
 
+/// Serialises the writes that move a repository's refs. A lease rather than a
+/// database lock, because the work it guards is backend network calls: holding
+/// a transaction open across those would tie a connection to a remote round
+/// trip, and a rollback could not undo a ref the backend already moved. The
+/// expiry is what releases it when a process dies mid-merge.
+model RepositoryLock {
+  repositoryId String   @id
+  /// Identifies the holder in logs; not used for correctness.
+  holder       String
+  expiresAt    DateTime
+  acquiredAt   DateTime @default(now())
+
+  @@map("repository_locks")
+}
+
 model RepositoryCollaborator {
   repositoryId String
   userId       String

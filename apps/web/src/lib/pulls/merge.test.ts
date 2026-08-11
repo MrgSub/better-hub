@@ -6,9 +6,8 @@ import type { HostedRepo } from "@/lib/repos/hosted-source";
 
 vi.mock("@/lib/db", () => ({
 	prisma: {
-		$transaction: vi.fn(async (run: (tx: unknown) => unknown) =>
-			run({ $executeRaw: vi.fn() }),
-		),
+		// The repository lease: taking it succeeds, releasing it is a no-op.
+		$executeRaw: vi.fn().mockResolvedValue(1),
 		pullRequest: {
 			findFirst: vi.fn(),
 			findMany: vi.fn(),
@@ -83,7 +82,11 @@ function hosted(stub: GitStub) {
 		ref: { owner: "adam", repo: "hello" },
 		defaultBranch: "main",
 		record: { id: "repo_1" } as Repository,
-		git: git as unknown as GitProvider,
+		git: {
+			backend: "code-storage",
+			mergeStrategies: ["merge", "squash", "fast_forward"],
+			...git,
+		} as unknown as GitProvider,
 	};
 	return { repo, git };
 }
@@ -293,6 +296,44 @@ describe("mergeHostedPull", () => {
 			error: expect.stringContaining("update the branch"),
 		});
 		expect(git.merge).not.toHaveBeenCalled();
+	});
+
+	it("fast-forwards instead of rebasing on a backend that cannot rebase", async () => {
+		// The head already carries the base — the only case a fast-forward can
+		// stand in for a rebase at all.
+		const { repo, git } = hosted({
+			branches: { main: "sha_base", feature: "sha_feature" },
+		});
+
+		expect(
+			await mergeHostedPull(repo, actor, { number: 7, strategy: "rebase" }),
+		).toMatchObject({ ok: true });
+		expect(git.merge).toHaveBeenCalledWith(
+			repo.ref,
+			"main",
+			"feature",
+			expect.objectContaining({ strategy: "fast_forward" }),
+		);
+	});
+
+	it("asks a backend that really rebases for a rebase", async () => {
+		const { repo, git } = hosted({
+			// Behind the base, which only a real rebase can handle.
+			branches: { main: "sha_moved", feature: "sha_feature" },
+		});
+		Object.assign(repo.git, {
+			mergeStrategies: ["merge", "squash", "rebase"],
+		});
+
+		expect(
+			await mergeHostedPull(repo, actor, { number: 7, strategy: "rebase" }),
+		).toMatchObject({ ok: true });
+		expect(git.merge).toHaveBeenCalledWith(
+			repo.ref,
+			"main",
+			"feature",
+			expect.objectContaining({ strategy: "rebase" }),
+		);
 	});
 
 	it("numbers the merge commit once, whether or not the title carries it", async () => {

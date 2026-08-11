@@ -32,7 +32,7 @@
 		"lint:fix": "oxlint --fix apps packages",
 		"fmt": "oxfmt --ignore-path .oxfmtignore apps packages *.json *.yaml",
 		"fmt:check": "oxfmt --ignore-path .oxfmtignore --check apps packages *.json *.yaml",
-		"typecheck": "bun -r exec tsc --noEmit",
+		"typecheck": "bun run --workspaces typecheck",
 		"check": "bun lint && bun fmt:check && bun typecheck",
 		"fix": "bun lint:fix && bun fmt",
 		"prepare": "simple-git-hooks"

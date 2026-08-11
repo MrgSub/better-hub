@@ -7,6 +7,7 @@ import {
 	extractRepoPermissions,
 } from "@/lib/github";
 import { parseRefAndPath, formatBytes, getLanguageFromFilename } from "@/lib/github-utils";
+import { hostedRepo, rawUrl as rawFileUrl } from "@/lib/repos/hosted-source";
 import { CodeViewer } from "@/components/repo/code-viewer";
 import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
 import { MarkdownBlobView } from "@/components/repo/markdown-blob-view";
@@ -59,7 +60,10 @@ export default async function BlobPage({
 
 	// Handle images
 	if (IMAGE_EXTENSIONS.has(ext)) {
-		const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path}`;
+		const hosted = await hostedRepo(owner, repo);
+		const rawUrl = hosted
+			? rawFileUrl(hosted, path, ref)
+			: `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path}`;
 		return (
 			<div className="border border-border p-8 flex items-center justify-center">
 				{/* eslint-disable-next-line @next/next/no-img-element */}

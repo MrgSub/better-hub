@@ -1,6 +1,7 @@
 import type { PullRequest, PullRequestComment } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import type { CompareResult, FileDiff } from "@/lib/git/types";
+import { githubFiles, patchStats } from "@/lib/git/github-shape";
+import type { CompareResult } from "@/lib/git/types";
 import type { PRBundleData, PRPageResult, ReviewThread } from "@/lib/github";
 import type { HostedRepo } from "@/lib/repos/hosted-source";
 import { resolutionBranchName } from "./merge";
@@ -16,16 +17,6 @@ import { resolutionBranchName } from "./merge";
 
 type ListedPull = PRPageResult["prs"][number];
 
-/** GitHub spells out what git abbreviates to a letter. */
-const FILE_STATUS: Record<FileDiff["status"], string> = {
-	A: "added",
-	M: "modified",
-	D: "removed",
-	R: "renamed",
-	C: "copied",
-	T: "changed",
-};
-
 /** "open" and "merged" are ours; the pages only know GitHub's two states. */
 function githubState(state: string): "open" | "closed" {
 	return state === "open" ? "open" : "closed";
@@ -34,21 +25,6 @@ function githubState(state: string): "open" | "closed" {
 function actor(login: string | null, avatarUrl: string | null) {
 	if (!login) return null;
 	return { login, avatar_url: avatarUrl ?? "" };
-}
-
-/**
- * The backends report a diff as a patch without per-file totals, and the pages
- * render those totals, so they are counted here rather than stored per file.
- */
-function patchStats(patch: string | null): { additions: number; deletions: number } {
-	if (!patch) return { additions: 0, deletions: 0 };
-	let additions = 0;
-	let deletions = 0;
-	for (const line of patch.split("\n")) {
-		if (line.startsWith("+") && !line.startsWith("+++")) additions++;
-		else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
-	}
-	return { additions, deletions };
 }
 
 /** Comment counts for a page of pull requests, in two queries instead of 2n. */
@@ -276,21 +252,7 @@ async function hostedMergeable(h: HostedRepo, row: PullRequest): Promise<boolean
 }
 
 function toChangedFiles(diff: CompareResult) {
-	return diff.files.map((file) => {
-		const stats = patchStats(file.patch);
-		return {
-			filename: file.path,
-			status: FILE_STATUS[file.status],
-			additions: stats.additions,
-			deletions: stats.deletions,
-			changes: stats.additions + stats.deletions,
-			patch: file.patch ?? undefined,
-			sha: diff.headSha,
-			blob_url: "",
-			raw_url: "",
-			contents_url: "",
-		};
-	});
+	return githubFiles(diff.files, diff.headSha);
 }
 
 export async function hostedPullFiles(h: HostedRepo, number: number) {

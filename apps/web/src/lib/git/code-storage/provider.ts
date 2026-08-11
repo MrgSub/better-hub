@@ -23,6 +23,7 @@ import {
 	type TagRef,
 	type TreeEntry,
 	type TreeEntryWithCommit,
+	UnsupportedGitOperation,
 	type UpstreamRef,
 } from "../types";
 import { CodeStorageClient, repoId, toCodeStorageScopes } from "./client";
@@ -74,6 +75,13 @@ function toBytes(content: Uint8Array | string): Uint8Array {
  */
 export class CodeStorageProvider implements GitProvider {
 	readonly backend = "code-storage";
+
+	/**
+	 * No rebase: the API offers `merge`, `ff_only` and `ff_prefer`, none of
+	 * which rewrites the head's commits onto the base. Fast-forward is offered
+	 * under its own name instead of being passed off as one.
+	 */
+	readonly mergeStrategies = ["merge", "squash", "fast_forward"] as const;
 	private readonly client: CodeStorageClient;
 
 	constructor(client: CodeStorageClient = new CodeStorageClient()) {
@@ -428,6 +436,9 @@ export class CodeStorageProvider implements GitProvider {
 	}
 
 	async merge(r: RepoRef, base: string, head: string, o: MergeOptions): Promise<MergeResult> {
+		if (o.strategy === "rebase") {
+			throw new UnsupportedGitOperation("rebase", this.backend);
+		}
 		const squash = o.strategy === "squash";
 		try {
 			const wire = await this.client.json<WireMergeResult>("/repos/merge", {
@@ -438,10 +449,10 @@ export class CodeStorageProvider implements GitProvider {
 				body: JSON.stringify({
 					source_branch: head,
 					target_branch: base,
-					// The backend has no rebase: `ff_only` is the closest true
-					// equivalent — a linear result, refused rather than faked
-					// when the head does not already carry the target.
-					strategy: o.strategy === "rebase" ? "ff_only" : "merge",
+					// `ff_only` refuses rather than fabricating a commit when
+					// the head does not already carry the target.
+					strategy:
+						o.strategy === "fast_forward" ? "ff_only" : "merge",
 					squash,
 					commit_message: o.message ?? `Merge ${head} into ${base}`,
 					author: { name: o.author.name, email: o.author.email },

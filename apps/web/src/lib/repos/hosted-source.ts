@@ -3,12 +3,14 @@ import { cache } from "react";
 import type { Repository } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { getGitProvider, type GitBackend } from "@/lib/git";
+import { githubCommit, githubFiles } from "@/lib/git/github-shape";
 import type { GitProvider } from "@/lib/git/provider";
 import type { RepoRef } from "@/lib/git/types";
 import type { RepoPageData } from "@/lib/github";
 import { hostedOpenPullCount } from "@/lib/pulls/hosted-source";
+import { hostedMergeMethods } from "@/lib/pulls/merge";
 import type { UpstreamPermission } from "./policy";
-import { findRepository, repositoryPermission } from "./registry";
+import { findRepository, providerRef, repositoryPermission } from "./registry";
 import {
 	cachedUpstreamStarred,
 	isMetadataStale,
@@ -41,7 +43,7 @@ export const hostedRepo = cache(async (owner: string, name: string): Promise<Hos
 	const record = await findRepository(owner, name);
 	if (!record) return null;
 	return {
-		ref: { owner: record.owner, repo: record.name },
+		ref: providerRef(record),
 		git: getGitProvider(record.gitBackend as GitBackend),
 		defaultBranch: record.defaultBranch,
 		record,
@@ -88,6 +90,7 @@ export async function hostedRepoData(h: HostedRepo, permission: UpstreamPermissi
 			? prisma.repository.findUnique({ where: { id: record.forkOfId } })
 			: null,
 	]);
+	const mergeMethods = hostedMergeMethods(h);
 	const upstreamUrl =
 		record.upstreamHost && record.upstreamOwner && record.upstreamName
 			? `https://${record.upstreamHost}/${record.upstreamOwner}/${record.upstreamName}`
@@ -128,6 +131,11 @@ export async function hostedRepoData(h: HostedRepo, permission: UpstreamPermissi
 			avatar_url: `https://github.com/${record.owner}.png`,
 			type: record.organizationId ? "Organization" : "User",
 		},
+		// Offered only where the backend really performs them, so the merge
+		// sheet cannot promise a rebase nobody can do.
+		allow_merge_commit: mergeMethods.merge,
+		allow_squash_merge: mergeMethods.squash,
+		allow_rebase_merge: mergeMethods.rebase,
 		permissions: grantsOf(permission),
 		parent: parent
 			? {
@@ -187,9 +195,22 @@ export async function hostedPageData(
  * rather than our (non-existent on GitHub) coordinates.
  */
 export async function githubCoordinates(owner: string, repo: string): Promise<RepoRef> {
+	return (await upstreamRepoRef(owner, repo)) ?? { owner, repo };
+}
+
+/**
+ * Where GitHub-backed data for these coordinates lives, or null when there is
+ * no GitHub repository behind them.
+ *
+ * Issues stay upstream while the code moves here, so a read of them has to ask
+ * about the upstream repository — asking about ours would query a name GitHub
+ * has never heard of, and a repo imported from nowhere has no issues at all.
+ */
+export async function upstreamRepoRef(owner: string, repo: string): Promise<RepoRef | null> {
 	const hosted = await hostedRepo(owner, repo);
-	const upstream = hosted && upstreamCoordinates(hosted.record);
-	return upstream ? { owner: upstream.owner, repo: upstream.repo } : { owner, repo };
+	if (!hosted) return { owner, repo };
+	const upstream = upstreamCoordinates(hosted.record);
+	return upstream ? { owner: upstream.owner, repo: upstream.repo } : null;
 }
 
 /**
@@ -261,6 +282,17 @@ export async function hostedTags(h: HostedRepo) {
 	}));
 }
 
+/**
+ * Where a hosted file's bytes are served from — our own raw route, since a
+ * repository that lives here has no `raw.githubusercontent.com` behind it.
+ */
+export function rawUrl(h: HostedRepo, path: string, ref: string): string {
+	const segments = path.split("/").map(encodeURIComponent).join("/");
+	return `/api/raw/${encodeURIComponent(h.record.owner)}/${encodeURIComponent(
+		h.record.name,
+	)}/${segments}?ref=${encodeURIComponent(ref)}`;
+}
+
 /** Directory listing; a file path returns the single entry GitHub would. */
 export async function hostedContents(h: HostedRepo, path: string, ref?: string) {
 	const at = ref || h.defaultBranch;
@@ -272,9 +304,9 @@ export async function hostedContents(h: HostedRepo, path: string, ref?: string) 
 		size: e.size ?? 0,
 		type: e.type === "tree" ? ("dir" as const) : ("file" as const),
 		url: "",
-		html_url: `/${h.ref.owner}/${h.ref.repo}/tree/${at}/${e.path}`,
+		html_url: `/${h.record.owner}/${h.record.name}/tree/${at}/${e.path}`,
 		git_url: "",
-		download_url: null,
+		download_url: e.type === "tree" ? null : rawUrl(h, e.path, at),
 	}));
 }
 
@@ -297,9 +329,9 @@ export async function hostedFileContent(h: HostedRepo, path: string, ref?: strin
 		// survive and it shows a download instead of an empty file.
 		content: new TextDecoder().decode(blob.content),
 		url: "",
-		html_url: `/${h.ref.owner}/${h.ref.repo}/blob/${at}/${path}`,
+		html_url: `/${h.record.owner}/${h.record.name}/blob/${at}/${path}`,
 		git_url: "",
-		download_url: null,
+		download_url: rawUrl(h, path, at),
 	};
 }
 
@@ -328,25 +360,33 @@ export async function hostedCommits(
 		}
 		cursor = result.nextCursor;
 	}
-	return items.map((c) => ({
-		sha: c.sha,
-		node_id: c.sha,
-		url: "",
-		html_url: `/${h.ref.owner}/${h.ref.repo}/commits/${c.sha}`,
-		comments_url: "",
-		commit: {
-			message: c.message,
-			author: { name: c.author.name, email: c.author.email, date: c.date },
-			committer: {
-				name: c.committer.name,
-				email: c.committer.email,
-				date: c.date,
-			},
-			comment_count: 0,
-			url: "",
+	return items.map((c) => githubCommit(c, h.ref));
+}
+
+/**
+ * One commit with the diff it introduced, shaped like `repos.getCommit`.
+ *
+ * Its own stats are preferred when the backend reports them; otherwise they
+ * are summed from the patches, because the page prints the totals.
+ */
+export async function hostedCommit(h: HostedRepo, sha: string) {
+	const detail = await h.git.getCommit(h.ref, sha);
+	if (!detail) return null;
+
+	const files = githubFiles(await h.git.getCommitDiff(h.ref, detail.sha), detail.sha);
+	const stats = detail.stats ?? {
+		files: files.length,
+		additions: files.reduce((n, f) => n + f.additions, 0),
+		deletions: files.reduce((n, f) => n + f.deletions, 0),
+	};
+
+	return {
+		...githubCommit(detail, h.ref),
+		stats: {
+			total: stats.additions + stats.deletions,
+			additions: stats.additions,
+			deletions: stats.deletions,
 		},
-		author: null,
-		committer: null,
-		parents: c.parents.map((sha) => ({ sha, url: "", html_url: "" })),
-	}));
+		files,
+	};
 }

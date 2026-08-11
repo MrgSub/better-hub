@@ -10,6 +10,7 @@ import {
 import {
 	findCanonicalRepository,
 	grantCollaborator,
+	providerRef,
 	recordRepository,
 	syncOrganizationMembership,
 	upstreamIdentity,
@@ -200,7 +201,7 @@ export async function migrateRepository(input: MigrateInput): Promise<MigrationR
 	if (decision.kind === "join") {
 		if (!canonical) throw new GitError("not_found", "Repository disappeared");
 		await grantCollaborator(canonical.id, input.actor.userId, decision.permission);
-		const target = { owner: canonical.owner, repo: canonical.name };
+		const target = providerRef(canonical);
 		const repo = (await git.getRepo(target)) ?? {
 			id: canonical.gitRepoId,
 			owner: canonical.owner,
@@ -222,10 +223,7 @@ export async function migrateRepository(input: MigrateInput): Promise<MigrationR
 		...(decision.kind === "fork" && decision.source === "canonical" && canonical
 			? {
 					forkOf: {
-						repo: {
-							owner: canonical.owner,
-							repo: canonical.name,
-						},
+						repo: providerRef(canonical),
 						ref: canonical.defaultBranch,
 					},
 				}

@@ -25,6 +25,20 @@ const KNOWN_ROUTES = [
 	"schemas",
 ];
 
+/** Allows avatars from a local GitHub emulator, which serves them over http. */
+const githubEmulatorImagePattern = process.env.GITHUB_EMULATOR_URL
+	? (() => {
+			const { protocol, hostname, port } = new URL(
+				process.env.GITHUB_EMULATOR_URL,
+			);
+			return {
+				protocol: protocol.replace(":", "") as "http" | "https",
+				hostname,
+				port,
+			};
+		})()
+	: null;
+
 const nextConfig: NextConfig = {
 	devIndicators: false,
 	serverExternalPackages: ["@prisma/client"],
@@ -56,6 +70,8 @@ const nextConfig: NextConfig = {
 			{ protocol: "https", hostname: "repository-images.githubusercontent.com" },
 			{ protocol: "https", hostname: "better-hub.com" },
 			{ protocol: "https", hostname: "images.better-auth.com" },
+			// Avatars served by a local GitHub emulator (see GITHUB_EMULATOR_URL).
+			...(githubEmulatorImagePattern ? [githubEmulatorImagePattern] : []),
 		],
 	},
 	async headers() {

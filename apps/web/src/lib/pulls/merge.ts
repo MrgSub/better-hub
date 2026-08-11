@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import type { MergeConflict, MergeStrategy as ProviderMergeStrategy } from "@/lib/git/types";
 import type { HostedRepo } from "@/lib/repos/hosted-source";
 import { RepoBusyError, withRepoLock } from "@/lib/repos/lock";
-import { repositoryPermission } from "@/lib/repos/registry";
+import { writeRefusal } from "@/lib/repos/registry";
 import type { PullAuthor } from "./create";
 
 /**
@@ -95,10 +95,8 @@ export async function mergeHostedPull(
 	actor: PullAuthor,
 	input: MergePullInput,
 ): Promise<MergePullResult> {
-	const permission = await repositoryPermission(h.record, actor.userId);
-	if (permission !== "admin" && permission !== "write") {
-		return { ok: false, error: "You do not have write access to this repository" };
-	}
+	const refusal = await writeRefusal(h.record, actor.userId);
+	if (refusal) return { ok: false, error: refusal };
 
 	const strategy = input.strategy ?? "merge";
 
@@ -409,10 +407,8 @@ export async function updateHostedPullBranch(
 	actor: PullAuthor,
 	number: number,
 ): Promise<{ ok: true; sha: string | null } | { ok: false; error: string }> {
-	const permission = await repositoryPermission(h.record, actor.userId);
-	if (permission !== "admin" && permission !== "write") {
-		return { ok: false, error: "You do not have write access to this repository" };
-	}
+	const refusal = await writeRefusal(h.record, actor.userId);
+	if (refusal) return { ok: false, error: refusal };
 
 	const pull = await openPull(h.record.id, number);
 	if (!pull) return { ok: false, error: "Pull request not found" };
@@ -463,10 +459,8 @@ export async function setHostedPullState(
 	number: number,
 	state: "open" | "closed",
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-	const permission = await repositoryPermission(h.record, actor.userId);
-	if (permission !== "admin" && permission !== "write") {
-		return { ok: false, error: "You do not have write access to this repository" };
-	}
+	const refusal = await writeRefusal(h.record, actor.userId);
+	if (refusal) return { ok: false, error: refusal };
 
 	const pull = await openPull(h.record.id, number);
 	if (!pull) return { ok: false, error: "Pull request not found" };

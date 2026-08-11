@@ -1,7 +1,7 @@
 import type { PullRequest } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import type { HostedRepo } from "@/lib/repos/hosted-source";
-import { repositoryPermission } from "@/lib/repos/registry";
+import { writeRefusal } from "@/lib/repos/registry";
 
 /**
  * Opening a pull request we own: the branches are resolved through the git
@@ -54,10 +54,8 @@ export async function createHostedPull(
 		return { ok: false, error: "The head and base branches are the same" };
 	}
 
-	const permission = await repositoryPermission(h.record, author.userId);
-	if (permission !== "admin" && permission !== "write") {
-		return { ok: false, error: "You do not have write access to this repository" };
-	}
+	const refusal = await writeRefusal(h.record, author.userId);
+	if (refusal) return { ok: false, error: refusal };
 
 	const branches = await h.git.listBranches(h.ref);
 	const head = branches.items.find((b) => b.name === input.head);

@@ -11,6 +11,7 @@ import { hostedOpenPullCount } from "@/lib/pulls/hosted-source";
 import { hostedMergeMethods } from "@/lib/pulls/merge";
 import type { UpstreamPermission } from "./policy";
 import { findRepository, providerRef, repositoryPermission } from "./registry";
+import { viewerId } from "./viewer";
 import {
 	cachedUpstreamStarred,
 	isMetadataStale,
@@ -38,10 +39,18 @@ export interface HostedRepo {
 /**
  * Resolves a repository we host, or null when GitHub is still its home.
  * Cached per request because every code read asks first.
+ *
+ * A private repository resolves only for someone we granted access to. GitHub
+ * used to enforce this for us by 404ing the repository itself; now that the
+ * bytes are ours, this is the one place that can — so the check lives here
+ * rather than in each of the forty-odd reads that would have to remember it.
  */
 export const hostedRepo = cache(async (owner: string, name: string): Promise<HostedRepo | null> => {
 	const record = await findRepository(owner, name);
 	if (!record) return null;
+	if (record.isPrivate && !(await repositoryPermission(record, await viewerId()))) {
+		return null;
+	}
 	return {
 		ref: providerRef(record),
 		git: getGitProvider(record.gitBackend as GitBackend),

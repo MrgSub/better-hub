@@ -3,7 +3,7 @@ import { repositoryAgent } from "@/lib/agents/connection";
 import { prisma } from "@/lib/db";
 import { GitError, type CommitFileChange } from "@/lib/git/types";
 import type { HostedRepo } from "@/lib/repos/hosted-source";
-import { repositoryPermission } from "@/lib/repos/registry";
+import { writeRefusal } from "@/lib/repos/registry";
 import type { ConflictFileData } from "@/lib/three-way-merge";
 import { conflictAgent, tooLargeToResolve } from "./agents";
 import type { PullAuthor } from "./create";
@@ -69,10 +69,8 @@ export async function resolveHostedConflicts(
 	number: number,
 	agent?: ConflictAgent,
 ): Promise<ResolveResult> {
-	const permission = await repositoryPermission(h.record, actor.userId);
-	if (permission !== "admin" && permission !== "write") {
-		return { ok: false, error: "You do not have write access to this repository" };
-	}
+	const refusal = await writeRefusal(h.record, actor.userId);
+	if (refusal) return { ok: false, error: refusal };
 
 	const pull = await prisma.pullRequest.findFirst({
 		where: { repositoryId: h.record.id, number },
@@ -157,10 +155,8 @@ export async function commitHostedResolution(
 	resolved: ResolvedFile[],
 	message?: string,
 ): Promise<ResolveResult> {
-	const permission = await repositoryPermission(h.record, actor.userId);
-	if (permission !== "admin" && permission !== "write") {
-		return { ok: false, error: "You do not have write access to this repository" };
-	}
+	const refusal = await writeRefusal(h.record, actor.userId);
+	if (refusal) return { ok: false, error: refusal };
 
 	const pull = await prisma.pullRequest.findFirst({
 		where: { repositoryId: h.record.id, number },

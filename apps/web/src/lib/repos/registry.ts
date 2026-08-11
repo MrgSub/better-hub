@@ -150,6 +150,21 @@ export async function repositoryPermission(
 	return membership ? "write" : null;
 }
 
+/**
+ * Why a write has to be refused, or null when it may proceed. Archived comes
+ * first because it holds even for an admin: the point of archiving is that the
+ * repository stops changing until someone lifts it in settings.
+ */
+export async function writeRefusal(
+	repository: Repository,
+	userId: string | null,
+): Promise<string | null> {
+	if (repository.archived) return "This repository is archived";
+	const permission = await repositoryPermission(repository, userId);
+	if (permission === "admin" || permission === "write") return null;
+	return "You do not have write access to this repository";
+}
+
 export async function grantCollaborator(
 	repositoryId: string,
 	userId: string,

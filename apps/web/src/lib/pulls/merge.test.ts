@@ -17,7 +17,19 @@ vi.mock("@/lib/db", () => ({
 		pullRequestEvent: { create: vi.fn() },
 	},
 }));
-vi.mock("@/lib/repos/registry", () => ({ repositoryPermission: vi.fn() }));
+// writeRefusal is thin and real; only the permission lookup under it is faked,
+// so these tests keep expressing access as a permission.
+vi.mock("@/lib/repos/registry", () => ({
+	repositoryPermission: vi.fn(),
+	writeRefusal: async (record: { archived: boolean }, userId: string | null) => {
+		if (record.archived) return "This repository is archived";
+		const { repositoryPermission } = await import("@/lib/repos/registry");
+		const permission = await repositoryPermission(record as never, userId);
+		return permission === "admin" || permission === "write"
+			? null
+			: "You do not have write access to this repository";
+	},
+}));
 
 import { prisma } from "@/lib/db";
 import { repositoryPermission } from "@/lib/repos/registry";

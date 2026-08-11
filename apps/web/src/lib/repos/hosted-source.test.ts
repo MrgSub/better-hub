@@ -8,19 +8,27 @@ vi.mock("@/lib/db", () => ({
 		repository: {
 			count: vi.fn().mockResolvedValue(0),
 			findUnique: vi.fn().mockResolvedValue(null),
+			findFirst: vi.fn().mockResolvedValue(null),
 		},
+		repositoryCollaborator: { findUnique: vi.fn().mockResolvedValue(null) },
+		organizationMember: { findUnique: vi.fn().mockResolvedValue(null) },
 	},
 }));
+vi.mock("./viewer", () => ({ viewerId: vi.fn().mockResolvedValue(null) }));
+vi.mock("@/lib/git", () => ({ getGitProvider: vi.fn(() => ({}) as GitProvider) }));
 
+import { prisma } from "@/lib/db";
 import {
 	hostedCommit,
 	hostedCommits,
 	hostedContents,
 	hostedFileContent,
 	hostedReadme,
+	hostedRepo,
 	hostedRepoData,
 	type HostedRepo,
 } from "./hosted-source";
+import { viewerId } from "./viewer";
 import { providerRef } from "./registry";
 
 function record(overrides: Partial<Repository> = {}): Repository {
@@ -357,5 +365,31 @@ describe("providerRef", () => {
 			owner: "adam",
 			repo: "hello",
 		});
+	});
+});
+
+describe("hostedRepo", () => {
+	it("resolves a public repository for anyone", async () => {
+		vi.mocked(prisma.repository.findFirst).mockResolvedValue(record());
+
+		expect(await hostedRepo("adam", "hello")).not.toBeNull();
+	});
+
+	it("hides a private repository from someone with no access", async () => {
+		vi.mocked(prisma.repository.findFirst).mockResolvedValue(
+			record({ isPrivate: true, ownerUserId: "user_1" }),
+		);
+		vi.mocked(viewerId).mockResolvedValue("stranger");
+
+		expect(await hostedRepo("adam", "hello")).toBeNull();
+	});
+
+	it("resolves a private repository for its owner", async () => {
+		vi.mocked(prisma.repository.findFirst).mockResolvedValue(
+			record({ isPrivate: true, ownerUserId: "user_1" }),
+		);
+		vi.mocked(viewerId).mockResolvedValue("user_1");
+
+		expect(await hostedRepo("adam", "hello")).not.toBeNull();
 	});
 });

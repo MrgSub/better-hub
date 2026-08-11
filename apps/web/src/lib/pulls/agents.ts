@@ -23,10 +23,12 @@ export const MAX_CONFLICT_BYTES = 256 * 1024;
 const RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1_000;
 
-const DEVIN_API_URL = "https://api.devin.ai/v1";
+const DEVIN_API_URL = "https://api.devin.ai/v3";
 const CURSOR_API_URL = "https://api.cursor.com/v1";
 const POLL_MS = 10_000;
 const AGENT_TIMEOUT_MS = 15 * 60_000;
+/** A resolution is a small edit; past this the session is spending, not working. */
+const DEVIN_MAX_ACU = 10;
 
 export function conflictSize(files: ConflictFileData[]): number {
 	let bytes = 0;
@@ -173,12 +175,39 @@ export const modelAgent: ConflictAgent = {
 
 interface DevinSession {
 	session_id: string;
+	status?: string | null;
+	status_detail?: string | null;
+	structured_output?: { files?: { path?: string; content?: string }[] } | null;
 }
 
-interface DevinSessionState {
-	status_enum?: string | null;
-	structured_output?: { files?: { path?: string; content?: string }[] } | null;
-	messages?: { message?: string }[] | null;
+/** The schema the session must answer in, validated by Devin before we see it. */
+const DEVIN_OUTPUT_SCHEMA = {
+	type: "object",
+	properties: {
+		files: {
+			type: "array",
+			items: {
+				type: "object",
+				properties: {
+					path: { type: "string" },
+					content: { type: "string" },
+				},
+				required: ["path", "content"],
+			},
+		},
+	},
+	required: ["files"],
+} as const;
+
+/** A session that has stopped, whether or not it got anywhere. */
+function devinStopped(session: DevinSession): boolean {
+	return (
+		session.status === "exit" ||
+		session.status === "error" ||
+		session.status === "suspended" ||
+		session.status_detail === "finished" ||
+		session.status_detail === "waiting_for_user"
+	);
 }
 
 async function devinFetch<T>(path: string, key: string, body?: unknown): Promise<T> {
@@ -206,29 +235,35 @@ async function devinFetch<T>(path: string, key: string, body?: unknown): Promise
  * that it can reason with tools before answering. The session is polled because
  * the API is asynchronous, and a run that never finishes is abandoned rather
  * than left holding the request open forever.
+ *
+ * Sessions live under an organization, so the key alone cannot address the API —
+ * `cog_` keys are rejected outright by the older unscoped endpoints.
  */
-export function devinAgent(key: string): ConflictAgent {
+export function devinAgent(key: string, orgId: string): ConflictAgent {
+	const sessions = `/organizations/${orgId}/sessions`;
 	return {
 		name: "devin",
 		async resolve(request) {
-			const session = await devinFetch<DevinSession>("/sessions", key, {
-				prompt: [
-					CONFLICT_MARKER_PROMPT,
-					conflictPrompt(request),
-					"Return the resolved files in structured output as",
-					'{"files": [{"path": "...", "content": "..."}]}.',
-				].join("\n\n"),
-				idempotent: true,
+			const created = await devinFetch<DevinSession>(sessions, key, {
+				prompt: [CONFLICT_MARKER_PROMPT, conflictPrompt(request)].join(
+					"\n\n",
+				),
+				title: `Resolve conflicts in ${request.headBranch}`,
+				structured_output_schema: DEVIN_OUTPUT_SCHEMA,
+				// Nothing is resumed and nothing is browsed to, so the machine is
+				// disposable and the run has the same ceiling as the model agent.
+				resumable: false,
+				max_acu_limit: DEVIN_MAX_ACU,
 			});
 
 			const deadline = Date.now() + AGENT_TIMEOUT_MS;
 			for (;;) {
 				await sleep(POLL_MS);
-				const state = await devinFetch<DevinSessionState>(
-					`/session/${session.session_id}`,
+				const session = await devinFetch<DevinSession>(
+					`${sessions}/${created.session_id}`,
 					key,
 				);
-				const files = state.structured_output?.files;
+				const files = session.structured_output?.files;
 				if (files?.length) {
 					return files
 						.filter(
@@ -240,17 +275,7 @@ export function devinAgent(key: string): ConflictAgent {
 						)
 						.map((f) => ({ path: f.path, content: f.content }));
 				}
-				if (
-					state.status_enum === "blocked" ||
-					state.status_enum === "finished"
-				) {
-					// It stopped without structured output; the transcript may still
-					// carry the fenced form the prompt asked for.
-					const text = (state.messages ?? [])
-						.map((m) => m.message ?? "")
-						.join("\n");
-					const parsed = parseFiles(text);
-					if (parsed.length > 0) return parsed;
+				if (devinStopped(session)) {
 					throw new Error(
 						"Devin finished without proposing a resolution",
 					);
@@ -353,7 +378,9 @@ export function conflictAgent(connection: ResolvedAgentConnection): ConflictAgen
 		case "devin":
 			if (!connection.apiKey)
 				throw new Error("Devin is connected without an API key");
-			return retrying(devinAgent(connection.apiKey));
+			if (!connection.accountId)
+				throw new Error("Devin is connected without an organization id");
+			return retrying(devinAgent(connection.apiKey, connection.accountId));
 		case "cursor":
 			if (!connection.apiKey)
 				throw new Error("Cursor is connected without an API key");

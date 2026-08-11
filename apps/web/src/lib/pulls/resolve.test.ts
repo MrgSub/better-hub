@@ -286,7 +286,11 @@ describe("resolveHostedConflicts", () => {
 
 	it("uses the agent the namespace connected when none is passed in", async () => {
 		const { repo, git } = hosted("clean");
-		vi.mocked(repositoryAgent).mockResolvedValue({ provider: "model", apiKey: null });
+		vi.mocked(repositoryAgent).mockResolvedValue({
+			provider: "model",
+			apiKey: null,
+			accountId: null,
+		});
 
 		const result = await resolveHostedConflicts(repo, actor, 7);
 

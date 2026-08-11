@@ -6,6 +6,7 @@ import {
 	disconnectAgent,
 	findAgentConnection,
 	isAgentProvider,
+	providerNeedsAccount,
 	providerNeedsKey,
 	saveAgentConnection,
 	connectionView,
@@ -38,7 +39,7 @@ async function administered(login: string): Promise<Administered> {
 
 export async function updateAgentConnection(
 	login: string,
-	input: { provider: string; enabled: boolean; apiKey?: string },
+	input: { provider: string; enabled: boolean; apiKey?: string; accountId?: string },
 ): Promise<ActionResult> {
 	const ctx = await administered(login);
 	if ("error" in ctx) return { error: ctx.error };
@@ -47,19 +48,25 @@ export async function updateAgentConnection(
 		return { error: `${input.provider} is not an agent we support` };
 	}
 
-	// Turning it on without a key would look connected and refuse every
-	// resolution, so it is rejected here rather than at merge time.
-	const apiKey = input.apiKey?.trim();
-	if (input.enabled && providerNeedsKey(input.provider) && !apiKey) {
-		const existing = await findAgentConnection(ctx.namespace.scope);
-		const stored = existing?.provider === input.provider && !!existing.apiKeyEnc;
-		if (!stored) return { error: `Add a ${input.provider} API key first` };
-	}
-
 	// A key belongs to the provider it was entered for; switching provider and
 	// keeping the old one would send a Devin key to Cursor.
 	const existing = await findAgentConnection(ctx.namespace.scope);
 	const providerChanged = !!existing && existing.provider !== input.provider;
+	const apiKey = input.apiKey?.trim();
+	const accountId = input.accountId?.trim();
+
+	// Turning it on half-configured would look connected and refuse every
+	// resolution, so it is rejected here rather than at merge time.
+	if (input.enabled && providerNeedsKey(input.provider) && !apiKey) {
+		const stored = !providerChanged && !!existing?.apiKeyEnc;
+		if (!stored) return { error: `Add a ${input.provider} API key first` };
+	}
+	if (input.enabled && providerNeedsAccount(input.provider) && !accountId) {
+		const stored = !providerChanged && !!existing?.accountId;
+		if (!stored) {
+			return { error: `Add the ${input.provider} organization id first` };
+		}
+	}
 
 	const connection = await saveAgentConnection(
 		ctx.namespace.scope,
@@ -67,6 +74,11 @@ export async function updateAgentConnection(
 			provider: input.provider,
 			enabled: input.enabled,
 			apiKey: apiKey ? apiKey : providerChanged ? null : undefined,
+			accountId: accountId
+				? accountId
+				: providerChanged || !providerNeedsAccount(input.provider)
+					? null
+					: undefined,
 		},
 		ctx.userId,
 	);

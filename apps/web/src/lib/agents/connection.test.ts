@@ -38,6 +38,7 @@ function connection(over: Partial<AgentConnection>): AgentConnection {
 		provider: "model",
 		enabled: false,
 		apiKeyEnc: null,
+		accountId: null,
 		connectedById: "user_1",
 		createdAt: new Date(),
 		updatedAt: new Date(),
@@ -156,6 +157,7 @@ describe("repositoryAgent", () => {
 		expect(await repositoryAgent(repo)).toEqual({
 			provider: "cursor",
 			apiKey: "key_abc",
+			accountId: null,
 		});
 	});
 
@@ -163,6 +165,55 @@ describe("repositoryAgent", () => {
 		vi.mocked(prisma.agentConnection.findUnique).mockResolvedValue(
 			connection({ provider: "model", enabled: true, apiKeyEnc: null }),
 		);
-		expect(await repositoryAgent(repo)).toEqual({ provider: "model", apiKey: null });
+		expect(await repositoryAgent(repo)).toEqual({
+			provider: "model",
+			apiKey: null,
+			accountId: null,
+		});
+	});
+
+	// Devin's api is addressed per organization, so a key without one cannot
+	// reach it — resolving would fail at the first request.
+	it("refuses devin without the organization its key belongs to", async () => {
+		vi.mocked(prisma.agentConnection.findUnique).mockResolvedValue(
+			connection({ provider: "devin", enabled: true, apiKeyEnc: "cipher" }),
+		);
+		expect(await repositoryAgent(repo)).toBeNull();
+	});
+
+	it("passes the organization along once it is stored", async () => {
+		vi.mocked(prisma.agentConnection.upsert).mockResolvedValue(
+			connection({ provider: "devin", enabled: true, apiKeyEnc: "placeholder" }),
+		);
+		await saveAgentConnection(
+			{ organizationId: "org_1" },
+			{
+				provider: "devin",
+				enabled: true,
+				apiKey: "cog_abc",
+				accountId: "org_x",
+			},
+			"user_1",
+		);
+		const stored = (
+			vi.mocked(prisma.agentConnection.upsert).mock.calls[0][0] as {
+				create: { apiKeyEnc: string };
+			}
+		).create.apiKeyEnc;
+
+		vi.mocked(prisma.agentConnection.findUnique).mockResolvedValue(
+			connection({
+				provider: "devin",
+				enabled: true,
+				apiKeyEnc: stored,
+				accountId: "org_x",
+			}),
+		);
+
+		expect(await repositoryAgent(repo)).toEqual({
+			provider: "devin",
+			apiKey: "cog_abc",
+			accountId: "org_x",
+		});
 	});
 });

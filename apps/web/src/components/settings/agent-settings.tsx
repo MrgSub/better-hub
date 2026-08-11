@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { KeyRound, Sparkles, Trash2 } from "lucide-react";
+import { Building2, KeyRound, Sparkles, Trash2 } from "lucide-react";
 import {
 	removeAgentConnection,
 	updateAgentConnection,
@@ -25,6 +25,7 @@ const PROVIDERS: {
 	detail: string;
 	keyHint?: string;
 	keyUrl?: string;
+	accountHint?: string;
 }[] = [
 	{
 		id: "model",
@@ -37,6 +38,9 @@ const PROVIDERS: {
 		detail: "Resolves in a Devin session using your organization's API key.",
 		keyHint: "Devin API key",
 		keyUrl: "https://app.devin.ai/settings/api-keys",
+		// Devin's sessions live under an organization and its api is addressed
+		// per organization, so the key on its own cannot reach it.
+		accountHint: "Devin organization id",
 	},
 	{
 		id: "cursor",
@@ -58,6 +62,7 @@ export function AgentSettings({
 	const [enabled, setEnabled] = useState(connection.enabled);
 	const [apiKey, setApiKey] = useState("");
 	const [hasKey, setHasKey] = useState(connection.hasKey);
+	const [accountId, setAccountId] = useState(connection.accountId ?? "");
 	const [error, setError] = useState<string | null>(null);
 	const [success, setSuccess] = useState<string | null>(null);
 	const [pending, startTransition] = useTransition();
@@ -146,6 +151,25 @@ export function AgentSettings({
 						}
 						className="w-full rounded-md border border-border/40 bg-transparent px-2.5 py-1.5 text-xs font-mono outline-none focus:border-border"
 					/>
+					{selected.accountHint && (
+						<div className="mt-2.5">
+							<label className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1.5">
+								<Building2 className="w-3 h-3" />
+								{selected.accountHint}
+							</label>
+							<input
+								type="text"
+								value={accountId}
+								onChange={(e) =>
+									setAccountId(e.target.value)
+								}
+								autoComplete="off"
+								spellCheck={false}
+								placeholder="org_..."
+								className="w-full rounded-md border border-border/40 bg-transparent px-2.5 py-1.5 text-xs font-mono outline-none focus:border-border"
+							/>
+						</div>
+					)}
 					<p className="text-[10px] text-muted-foreground/70 mt-1.5 leading-relaxed">
 						Stored encrypted and never shown again. The agent is
 						sent only the conflicted text — it needs no access
@@ -183,6 +207,9 @@ export function AgentSettings({
 									provider,
 									enabled,
 									apiKey: apiKey || undefined,
+									accountId:
+										accountId ||
+										undefined,
 								},
 							);
 							if ("success" in result) {
@@ -214,6 +241,7 @@ export function AgentSettings({
 								setEnabled(false);
 								setHasKey(false);
 								setApiKey("");
+								setAccountId("");
 							}
 							return result;
 						}, "Disconnected")

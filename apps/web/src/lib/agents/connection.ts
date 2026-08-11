@@ -24,6 +24,14 @@ export function providerNeedsKey(provider: AgentProvider): boolean {
 	return provider !== "model";
 }
 
+/**
+ * Devin's api is addressed per organization, so its key is only usable
+ * alongside the organization id it belongs to.
+ */
+export function providerNeedsAccount(provider: AgentProvider): boolean {
+	return provider === "devin";
+}
+
 export function isAgentProvider(value: string): value is AgentProvider {
 	return (AGENT_PROVIDERS as readonly string[]).includes(value);
 }
@@ -42,17 +50,25 @@ export interface AgentConnectionView {
 	provider: AgentProvider;
 	enabled: boolean;
 	hasKey: boolean;
+	accountId: string | null;
 	updatedAt: Date | null;
 }
 
 export function connectionView(connection: AgentConnection | null): AgentConnectionView {
 	if (!connection) {
-		return { provider: "model", enabled: false, hasKey: false, updatedAt: null };
+		return {
+			provider: "model",
+			enabled: false,
+			hasKey: false,
+			accountId: null,
+			updatedAt: null,
+		};
 	}
 	return {
 		provider: isAgentProvider(connection.provider) ? connection.provider : "model",
 		enabled: connection.enabled,
 		hasKey: !!connection.apiKeyEnc,
+		accountId: connection.accountId,
 		updatedAt: connection.updatedAt,
 	};
 }
@@ -74,7 +90,12 @@ function authSecret(): string {
  */
 export async function saveAgentConnection(
 	scope: AgentScope,
-	input: { provider: AgentProvider; enabled: boolean; apiKey?: string | null },
+	input: {
+		provider: AgentProvider;
+		enabled: boolean;
+		apiKey?: string | null;
+		accountId?: string | null;
+	},
 	connectedById: string,
 ): Promise<AgentConnectionView> {
 	const apiKeyEnc =
@@ -91,12 +112,14 @@ export async function saveAgentConnection(
 			provider: input.provider,
 			enabled: input.enabled,
 			apiKeyEnc: apiKeyEnc ?? null,
+			accountId: input.accountId ?? null,
 			connectedById,
 		},
 		update: {
 			provider: input.provider,
 			enabled: input.enabled,
 			...(apiKeyEnc === undefined ? {} : { apiKeyEnc }),
+			...(input.accountId === undefined ? {} : { accountId: input.accountId }),
 			connectedById,
 		},
 	});
@@ -111,6 +134,7 @@ export async function disconnectAgent(scope: AgentScope): Promise<void> {
 export interface ResolvedAgentConnection {
 	provider: AgentProvider;
 	apiKey: string | null;
+	accountId: string | null;
 }
 
 /**
@@ -126,12 +150,16 @@ export async function repositoryAgent(record: Repository): Promise<ResolvedAgent
 	if (!connection?.enabled) return null;
 
 	const provider = isAgentProvider(connection.provider) ? connection.provider : "model";
+	if (providerNeedsAccount(provider) && !connection.accountId) return null;
 	if (!connection.apiKeyEnc) {
-		return providerNeedsKey(provider) ? null : { provider, apiKey: null };
+		return providerNeedsKey(provider)
+			? null
+			: { provider, apiKey: null, accountId: connection.accountId };
 	}
 
 	return {
 		provider,
 		apiKey: await symmetricDecrypt({ key: authSecret(), data: connection.apiKeyEnc }),
+		accountId: connection.accountId,
 	};
 }

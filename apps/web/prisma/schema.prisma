@@ -156,6 +156,9 @@ model AgentConnection {
   /// Encrypted with the auth secret, like the OAuth tokens; null for "model",
   /// which spends the requesting user's own model credits instead.
   apiKeyEnc String?
+  /// The account the key acts in, when the provider's api is scoped to one:
+  /// Devin puts its organization id in the path. Not a secret.
+  accountId String?
 
   connectedById String?
   createdAt     DateTime @default(now())

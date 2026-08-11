@@ -1,15 +1,25 @@
-import type { Metadata } from "next";
 import { Settings, ShieldAlert } from "lucide-react";
-import { getOctokit, getRepoBranches, extractRepoPermissions } from "@/lib/github";
+import { getRepo, getRepoBranches, extractRepoPermissions } from "@/lib/github";
+import { getServerSession } from "@/lib/auth";
+import { hostedRepo } from "@/lib/repos/hosted-source";
 import { RepoSettings } from "@/components/repo/repo-settings";
 
-export async function generateMetadata({
-	params,
+function Notice({
+	icon: Icon,
+	title,
+	detail,
 }: {
-	params: Promise<{ owner: string; repo: string }>;
-}): Promise<Metadata> {
-	const { owner, repo } = await params;
-	return { title: `Settings · ${owner}/${repo}` };
+	icon: typeof Settings;
+	title: string;
+	detail: string;
+}) {
+	return (
+		<div className="py-16 text-center">
+			<Icon className="w-6 h-6 text-muted-foreground/30 mx-auto mb-3" />
+			<h2 className="text-sm font-medium text-muted-foreground/70">{title}</h2>
+			<p className="text-xs text-muted-foreground/50 font-mono mt-1">{detail}</p>
+		</div>
+	);
 }
 
 export default async function SettingsPage({
@@ -18,53 +28,42 @@ export default async function SettingsPage({
 	params: Promise<{ owner: string; repo: string }>;
 }) {
 	const { owner, repo } = await params;
-	const octokit = await getOctokit();
+	const session = await getServerSession();
 
-	if (!octokit) {
+	if (!session) {
 		return (
-			<div className="py-16 text-center">
-				<Settings className="w-6 h-6 text-muted-foreground/30 mx-auto mb-3" />
-				<h2 className="text-sm font-medium text-muted-foreground/70">
-					Settings
-				</h2>
-				<p className="text-xs text-muted-foreground/50 font-mono mt-1">
-					Sign in to access repository settings
-				</p>
-			</div>
+			<Notice
+				icon={Settings}
+				title="Settings"
+				detail="Sign in to access repository settings"
+			/>
 		);
 	}
 
-	let repoData;
-	try {
-		const { data } = await octokit.repos.get({ owner, repo });
-		repoData = data;
-	} catch {
+	// Repositories we host answer from our own record, so their settings load
+	// and save with no GitHub call.
+	const [hosted, repoData] = await Promise.all([
+		hostedRepo(owner, repo),
+		getRepo(owner, repo),
+	]);
+
+	if (!repoData) {
 		return (
-			<div className="py-16 text-center">
-				<Settings className="w-6 h-6 text-muted-foreground/30 mx-auto mb-3" />
-				<h2 className="text-sm font-medium text-muted-foreground/70">
-					Settings
-				</h2>
-				<p className="text-xs text-muted-foreground/50 font-mono mt-1">
-					Failed to load repository data
-				</p>
-			</div>
+			<Notice
+				icon={Settings}
+				title="Settings"
+				detail="Failed to load repository data"
+			/>
 		);
 	}
 
-	const permissions = extractRepoPermissions(repoData);
-
-	if (!permissions.admin) {
+	if (!extractRepoPermissions(repoData).admin) {
 		return (
-			<div className="py-16 text-center">
-				<ShieldAlert className="w-6 h-6 text-muted-foreground/30 mx-auto mb-3" />
-				<h2 className="text-sm font-medium text-muted-foreground/70">
-					Access Denied
-				</h2>
-				<p className="text-xs text-muted-foreground/50 font-mono mt-1">
-					You need admin permissions to access repository settings
-				</p>
-			</div>
+			<Notice
+				icon={ShieldAlert}
+				title="Access Denied"
+				detail="You need admin permissions to access repository settings"
+			/>
 		);
 	}
 
@@ -75,10 +74,11 @@ export default async function SettingsPage({
 		<RepoSettings
 			owner={owner}
 			repo={repo}
+			hosted={hosted !== null}
 			repoData={{
 				name: repoData.name,
-				description: repoData.description,
-				homepage: repoData.homepage,
+				description: repoData.description ?? null,
+				homepage: repoData.homepage ?? null,
 				private: repoData.private,
 				archived: repoData.archived,
 				topics: repoData.topics ?? [],

@@ -67,11 +67,10 @@ export async function syncUpstreamMetadata(
 		return await prisma.repository.update({
 			where: { id: record.id },
 			data: {
-				description: data.description,
-				homepage: data.homepage || null,
-				topics: data.topics ?? [],
-				isPrivate: data.private,
-				archived: data.archived,
+				// Only what GitHub still owns. Description, homepage, topics,
+				// visibility and the archived flag are seeded at import and
+				// editable here afterwards, so copying them again would revert
+				// whatever an admin changed an hour earlier.
 				sizeKb: data.size,
 				stars: data.stargazers_count,
 				watchers: data.subscribers_count ?? data.watchers_count,

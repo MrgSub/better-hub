@@ -27,14 +27,14 @@ export function upstreamIdentity(
 /**
  * How the backend knows this repository, as opposed to how we display it.
  *
- * The backend named it at creation time and recorded that name in
- * `gitRepoId`; our `owner`/`name` are display coordinates that a rename or a
- * casing fix can move underneath it. Reads therefore go by the recorded id,
- * falling back to the display pair for rows written before it was stored.
+ * The backend named it at creation time and cannot rename it, while our
+ * `owner`/`name` are display coordinates a rename or a casing fix moves
+ * underneath it — so those two must not be confused. `gitRepoId` is no
+ * substitute either: a backend is free to make it an opaque id rather than a
+ * path, and Code Storage does.
  */
 export function providerRef(record: Repository): RepoRef {
-	const [owner, repo] = record.gitRepoId.split("/");
-	return owner && repo ? { owner, repo } : { owner: record.owner, repo: record.name };
+	return { owner: record.gitOwner, repo: record.gitName };
 }
 
 export function findCanonicalRepository(upstream: UpstreamIdentity): Promise<Repository | null> {
@@ -103,6 +103,8 @@ export function recordRepository(input: RecordRepositoryInput): Promise<Reposito
 			defaultBranch: input.repo.defaultBranch,
 			gitBackend: input.backend,
 			gitRepoId: input.repo.id,
+			gitOwner: input.repo.owner,
+			gitName: input.repo.name,
 			description: input.metadata?.description ?? null,
 			homepage: input.metadata?.homepage ?? null,
 			topics: input.metadata?.topics ?? [],

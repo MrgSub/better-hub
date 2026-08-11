@@ -45,8 +45,10 @@ export interface HostedRepo {
  * bytes are ours, this is the one place that can — so the check lives here
  * rather than in each of the forty-odd reads that would have to remember it.
  */
+const hostedRecord = cache(findRepository);
+
 export const hostedRepo = cache(async (owner: string, name: string): Promise<HostedRepo | null> => {
-	const record = await findRepository(owner, name);
+	const record = await hostedRecord(owner, name);
 	if (!record) return null;
 	if (record.isPrivate && !(await repositoryPermission(record, await viewerId()))) {
 		return null;
@@ -58,6 +60,21 @@ export const hostedRepo = cache(async (owner: string, name: string): Promise<Hos
 		record,
 	};
 });
+
+/**
+ * True when the repository is ours but not this viewer's to see.
+ *
+ * `hostedRepo` answers null to both "GitHub still hosts it" and "ours, but not
+ * yours", and only the first may fall through to GitHub: falling through on the
+ * second answers a read about our repository with whatever repository happens
+ * to carry the same name over there.
+ */
+export async function hostedButHidden(owner: string, name: string): Promise<boolean> {
+	return (
+		(await hostedRecord(owner, name)) !== null &&
+		(await hostedRepo(owner, name)) === null
+	);
+}
 
 /**
  * Tip of the default branch. Cached per request because both the overview and

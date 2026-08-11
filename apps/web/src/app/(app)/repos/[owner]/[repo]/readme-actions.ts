@@ -3,7 +3,13 @@
 import { getOctokit, getGitHubToken } from "@/lib/github";
 import { renderMarkdownToHtml } from "@/components/shared/markdown-renderer";
 import { setCachedReadmeHtml } from "@/lib/readme-cache";
-import { hostedBranches, hostedReadme, hostedRepo, hostedTags } from "@/lib/repos/hosted-source";
+import {
+	hostedBranches,
+	hostedButHidden,
+	hostedReadme,
+	hostedRepo,
+	hostedTags,
+} from "@/lib/repos/hosted-source";
 import { parseLanguages } from "@/lib/repos/upstream-metadata";
 import {
 	setCachedRepoLanguages,
@@ -14,12 +20,24 @@ import {
 	type BranchRef,
 } from "@/lib/repo-data-cache";
 
+/**
+ * GitHub, for a repository that is GitHub's to answer for.
+ *
+ * The hosted branch of each read below is skipped both when GitHub still hosts
+ * the repository and when it is ours but not this viewer's, and only the first
+ * of those may go upstream: the second would answer a read about our repository
+ * with whatever repository carries the same name over there.
+ */
+async function upstreamOctokit(owner: string, repo: string) {
+	return (await hostedButHidden(owner, repo)) ? null : await getOctokit();
+}
+
 /** Hosted repos read their README from our git backend; the rest from GitHub. */
 async function readReadme(owner: string, repo: string, branch: string): Promise<string | null> {
 	const hosted = await hostedRepo(owner, repo);
 	if (hosted) return (await hostedReadme(hosted, branch))?.content ?? null;
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return null;
 
 	try {
@@ -68,7 +86,7 @@ export async function revalidateLanguages(
 }
 
 async function readLanguages(owner: string, repo: string): Promise<Record<string, number> | null> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return null;
 
 	try {
@@ -83,7 +101,7 @@ export async function revalidateContributorAvatars(
 	owner: string,
 	repo: string,
 ): Promise<{ avatars: ContributorAvatar[]; totalCount: number } | null> {
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return null;
 
 	try {
@@ -125,7 +143,7 @@ export async function revalidateBranches(owner: string, repo: string): Promise<B
 		return branches;
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return null;
 
 	try {
@@ -150,7 +168,7 @@ export async function revalidateTags(owner: string, repo: string): Promise<Branc
 		return tags;
 	}
 
-	const octokit = await getOctokit();
+	const octokit = await upstreamOctokit(owner, repo);
 	if (!octokit) return null;
 
 	try {
@@ -188,7 +206,7 @@ export async function fetchUsedBy(owner: string, repo: string): Promise<UsedByDa
 
 	try {
 		// 1. Detect the package name from package.json
-		const octokit = await getOctokit();
+		const octokit = await upstreamOctokit(owner, repo);
 		if (!octokit) return null;
 
 		let packageName: string | null = null;

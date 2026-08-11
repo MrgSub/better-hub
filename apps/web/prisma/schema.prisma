@@ -195,6 +195,10 @@ model Repository {
   defaultBranch  String
   gitBackend     String
   gitRepoId      String
+  /// The coordinates the backend itself knows this repository by, fixed when it
+  /// was created. `owner`/`name` above are what we display and may be renamed.
+  gitOwner       String
+  gitName        String
   description    String?
   homepage       String?
   topics         String[] @default([])

@@ -21,6 +21,7 @@ import { computeContributorScore } from "./contributor-score";
 import { getCachedAuthorDossier, setCachedAuthorDossier } from "./repo-data-cache";
 import {
 	hostedBranches,
+	hostedButHidden,
 	hostedCommit,
 	hostedCommits,
 	hostedContents,
@@ -2510,6 +2511,11 @@ async function readLocalFirstGitData<T>({
 	fetchRemote,
 }: LocalFirstGitReadOptions<T>): Promise<T> {
 	if (!authCtx) return fallback;
+
+	// The hosted branch above each of these reads is skipped for a repository
+	// of ours the viewer may not see, and GitHub must not answer in its place.
+	const { owner, repo } = jobPayload;
+	if (owner && repo && (await hostedButHidden(owner, repo))) return fallback;
 
 	const shareable = isShareableCacheType(cacheType);
 

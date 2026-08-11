@@ -3,7 +3,7 @@
 import { getOctokit, getGitHubToken } from "@/lib/github";
 import { renderMarkdownToHtml } from "@/components/shared/markdown-renderer";
 import { setCachedReadmeHtml } from "@/lib/readme-cache";
-import { hostedReadme, hostedRepo } from "@/lib/repos/hosted-source";
+import { hostedBranches, hostedReadme, hostedRepo, hostedTags } from "@/lib/repos/hosted-source";
 import { parseLanguages } from "@/lib/repos/upstream-metadata";
 import {
 	setCachedRepoLanguages,
@@ -114,6 +114,17 @@ export async function revalidateContributorAvatars(
 }
 
 export async function revalidateBranches(owner: string, repo: string): Promise<BranchRef[] | null> {
+	// The picker refreshes itself on the client, so a hosted repo would ask
+	// GitHub for refs only we have — 404 there, and the repo name on the wire.
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		const branches: BranchRef[] = (await hostedBranches(hosted)).map((b) => ({
+			name: b.name,
+		}));
+		await setCachedBranches(owner, repo, branches);
+		return branches;
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return null;
 
@@ -132,6 +143,13 @@ export async function revalidateBranches(owner: string, repo: string): Promise<B
 }
 
 export async function revalidateTags(owner: string, repo: string): Promise<BranchRef[] | null> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		const tags: BranchRef[] = (await hostedTags(hosted)).map((t) => ({ name: t.name }));
+		await setCachedTags(owner, repo, tags);
+		return tags;
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return null;
 

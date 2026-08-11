@@ -257,8 +257,16 @@ export function threeWayMerge(ancestor: string[], base: string[], head: string[]
 			// Determine which edit starts first
 			const beStart = be.ancestorStart;
 			const heStart = he.ancestorStart;
+			// Two insertions at the same point cover no ancestor line, so the
+			// range tests below would call them disjoint and concatenate both
+			// sides — an order nobody chose. They compete for one position, and
+			// a file created on both branches is the whole file competing.
+			const sameInsertPoint =
+				beStart === heStart &&
+				be.ancestorStart === be.ancestorEnd &&
+				he.ancestorStart === he.ancestorEnd;
 
-			if (be.ancestorEnd <= heStart) {
+			if (!sameInsertPoint && be.ancestorEnd <= heStart) {
 				// Base edit finishes before head edit starts — no overlap
 				// Emit clean context before this edit
 				if (ancestorPos < beStart) {
@@ -271,7 +279,7 @@ export function threeWayMerge(ancestor: string[], base: string[], head: string[]
 				hunks.push({ type: "clean", resolvedLines: be.changedLines });
 				ancestorPos = be.ancestorEnd;
 				bi++;
-			} else if (he.ancestorEnd <= beStart) {
+			} else if (!sameInsertPoint && he.ancestorEnd <= beStart) {
 				// Head edit finishes before base edit starts — no overlap
 				if (ancestorPos < heStart) {
 					hunks.push({

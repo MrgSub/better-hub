@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useClickOutside } from "@/hooks/use-click-outside";
 import {
 	GitMerge,
@@ -119,6 +119,7 @@ export function PRMergePanel({
 	];
 
 	const router = useRouter();
+	const pathname = usePathname();
 	const { openChat } = useGlobalChat();
 	const { emit } = useMutationEvents();
 	const queryClient = useQueryClient();
@@ -142,6 +143,8 @@ export function PRMergePanel({
 	const sheetMethodDropdownRef = useRef<HTMLDivElement>(null);
 
 	const isOpen = state === "open" && !merged && !isMerged;
+	/** The resolver lives on this page behind a query param. */
+	const openResolver = () => router.push(`${pathname}?resolve=conflicts`);
 	const showUpdateBranch =
 		isOpen && hasPermission && (branchBehindBase || mergeable === false);
 	const updateBranchDisabled = mergeable === false;
@@ -425,22 +428,25 @@ export function PRMergePanel({
 				{canWrite && (
 					<button
 						onClick={
-							mergeable === false || draft
+							draft
 								? undefined
-								: handleMergeClick
+								: mergeable === false
+									? openResolver
+									: handleMergeClick
 						}
-						disabled={isPending || mergeable === false || draft}
+						disabled={isPending || draft}
 						className={cn(
 							"flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider rounded-sm transition-colors disabled:cursor-not-allowed",
 							mergeable === false || draft
 								? "bg-amber-500/80 text-background opacity-90 border border-amber-500/40"
-								: "bg-foreground text-background hover:bg-foreground/90 cursor-pointer disabled:opacity-50 border border-foreground/80",
+								: "bg-foreground text-background hover:bg-foreground/90 disabled:opacity-50 border border-foreground/80",
+							!draft && "cursor-pointer",
 						)}
 						title={
 							draft
 								? "This PR is still a draft"
 								: mergeable === false
-									? "Resolve conflicts before merging"
+									? "Resolve the conflicts before merging"
 									: undefined
 						}
 					>

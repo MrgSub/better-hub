@@ -295,6 +295,50 @@ describe("mergeHostedPull", () => {
 		expect(git.merge).not.toHaveBeenCalled();
 	});
 
+	it("numbers the merge commit once, whether or not the title carries it", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+		});
+		vi.mocked(prisma.pullRequest.findFirst).mockResolvedValue(
+			pull({ bodyMd: "Why it exists" }),
+		);
+
+		for (const [title, expected] of [
+			[undefined, "Add a thing (#7)\n\nWhy it exists"],
+			["Add a thing (#7)", "Add a thing (#7)\n\nWhy it exists"],
+			["Renamed", "Renamed (#7)\n\nWhy it exists"],
+		] as const) {
+			await mergeHostedPull(repo, actor, { number: 7, title });
+			expect(git.merge).toHaveBeenLastCalledWith(
+				repo.ref,
+				"main",
+				"feature",
+				expect.objectContaining({ message: expected }),
+			);
+		}
+	});
+
+	it("keeps the title when the merge sheet supplies its own body", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+		});
+
+		await mergeHostedPull(repo, actor, {
+			number: 7,
+			title: "Add a thing (#7)",
+			message: "Typed by the merger",
+		});
+
+		expect(git.merge).toHaveBeenCalledWith(
+			repo.ref,
+			"main",
+			"feature",
+			expect.objectContaining({
+				message: "Add a thing (#7)\n\nTyped by the merger",
+			}),
+		);
+	});
+
 	it("deletes the branch when nothing stacks on it", async () => {
 		const { repo, git } = hosted({
 			branches: { main: "sha_main", feature: "sha_feature" },

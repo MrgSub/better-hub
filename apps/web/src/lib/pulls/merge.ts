@@ -65,6 +65,19 @@ function gitActor(actor: PullAuthor) {
 	};
 }
 
+/**
+ * The pull request's number belongs on the subject line exactly once: the merge
+ * sheet prefills the title with it, so appending unconditionally would land
+ * `Title (#4) (#4)`.
+ */
+function mergeMessage(pull: PullRequest, input: MergePullInput): string {
+	const title = input.title?.trim() || pull.title;
+	const suffix = `(#${pull.number})`;
+	const subject = title.endsWith(suffix) ? title : `${title} ${suffix}`;
+	const body = input.message?.trim() || pull.bodyMd?.trim() || "";
+	return body ? `${subject}\n\n${body}` : subject;
+}
+
 async function openPull(repositoryId: string, number: number): Promise<PullRequest | null> {
 	return prisma.pullRequest.findFirst({ where: { repositoryId, number } });
 }
@@ -147,11 +160,7 @@ export async function mergeHostedPull(
 		const result = await h.git.merge(h.ref, pull.baseBranch, source, {
 			author: gitActor(actor),
 			strategy,
-			message:
-				input.message ??
-				`${input.title ?? pull.title} (#${pull.number})${
-					pull.bodyMd ? `\n\n${pull.bodyMd}` : ""
-				}`,
+			message: mergeMessage(pull, input),
 			expectedBaseSha: base.sha,
 		});
 		if (!result.merged && result.status === "conflicted") {

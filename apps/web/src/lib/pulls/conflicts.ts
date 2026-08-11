@@ -55,9 +55,13 @@ function classify(
 		return { path, hunks: [], hasConflicts: false, autoResolved: true };
 	}
 
-	const ancestor = (ancestorContent ?? "").split("\n");
-	const baseLines = (baseContent ?? "").split("\n");
-	const headLines = (headContent ?? "").split("\n");
+	// A file that does not exist at a revision has no lines. Spelling that as
+	// `""` would give it one empty line, which reads as content both sides
+	// happen to share.
+	const lines = (content: string | null) => (content === null ? [] : content.split("\n"));
+	const ancestor = lines(ancestorContent);
+	const baseLines = lines(baseContent);
+	const headLines = lines(headContent);
 	const baseChanged = baseContent !== ancestorContent;
 	const headChanged = headContent !== ancestorContent;
 

@@ -19,6 +19,32 @@ import {
 import { redis } from "./redis";
 import { computeContributorScore } from "./contributor-score";
 import { getCachedAuthorDossier, setCachedAuthorDossier } from "./repo-data-cache";
+import {
+	hostedBranches,
+	hostedCommit,
+	hostedCommits,
+	hostedContents,
+	hostedFileContent,
+	hostedPageData,
+	hostedReadme,
+	hostedRepo,
+	hostedRepoData,
+	hostedTags,
+	hostedTree,
+	upstreamRepoRef,
+} from "./repos/hosted-source";
+import {
+	hostedCompare,
+	hostedPull,
+	hostedPullBundle,
+	hostedPullComments,
+	hostedPullCommits,
+	hostedPullFiles,
+	hostedPullPage,
+	hostedPullReviews,
+	hostedPullReviewThreads,
+} from "./pulls/hosted-source";
+import { repositoryPermission } from "./repos/registry";
 
 export type RepoPermissions = {
 	admin: boolean;
@@ -124,6 +150,16 @@ const SHAREABLE_CACHE_TYPES: ReadonlySet<string> = new Set([
 	"org_members",
 	"trending_repos",
 ]);
+
+/**
+ * Hosted repositories answer code reads from their own git backend. The
+ * payloads carry every field the pages read, but not octokit's REST ceremony
+ * (node ids, api urls), so the shape is asserted here once instead of making
+ * each page branch on where the repository lives.
+ */
+function asGitHubShape<T>(value: unknown): T {
+	return value as T;
+}
 
 function isShareableCacheType(jobType: string): boolean {
 	return SHAREABLE_CACHE_TYPES.has(jobType);
@@ -1248,6 +1284,17 @@ export async function isBranchBehindBase(
 	headRef: string,
 	headOwner?: string | null,
 ): Promise<boolean> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		// Commits the base carries beyond the merge base are what the head is
+		// behind by, so comparing the other way round answers it.
+		try {
+			return (await hostedCompare(hosted, headRef, baseRef)).ahead_by > 0;
+		} catch {
+			return false;
+		}
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return false;
 	try {
@@ -2754,6 +2801,17 @@ export async function getTrendingRepos(
 
 export async function getRepo(owner: string, repo: string) {
 	const authCtx = await getGitHubAuthContext();
+
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoFromGitHub>>>(
+			await hostedRepoData(
+				hosted,
+				await repositoryPermission(hosted.record, authCtx?.userId ?? null),
+			),
+		);
+	}
+
 	const cacheKey = buildRepoCacheKey(owner, repo);
 
 	return readLocalFirstGitData({
@@ -2789,6 +2847,13 @@ export async function checkIsStarred(owner: string, repo: string): Promise<boole
 }
 
 export async function getRepoContents(owner: string, repo: string, path: string, ref?: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoContentsFromGitHub>>>(
+			await hostedContents(hosted, path, ref),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	const normalizedRef = normalizeRef(ref);
 	const cacheKey = buildRepoContentsCacheKey(owner, repo, path, normalizedRef);
@@ -2817,8 +2882,15 @@ export async function getRepoTree(
 	treeSha: string,
 	recursive?: boolean,
 ) {
-	const authCtx = await getGitHubAuthContext();
 	const recursiveFlag = recursive === true;
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoTreeFromGitHub>>>(
+			await hostedTree(hosted, treeSha, recursiveFlag),
+		);
+	}
+
+	const authCtx = await getGitHubAuthContext();
 	const cacheKey = buildRepoTreeCacheKey(owner, repo, treeSha, recursiveFlag);
 
 	return readLocalFirstGitData({
@@ -2834,6 +2906,13 @@ export async function getRepoTree(
 }
 
 export async function getRepoBranches(owner: string, repo: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoBranchesFromGitHub>>>(
+			await hostedBranches(hosted),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	const cacheKey = buildRepoBranchesCacheKey(owner, repo);
 
@@ -2849,6 +2928,13 @@ export async function getRepoBranches(owner: string, repo: string) {
 }
 
 export async function getRepoTags(owner: string, repo: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoTagsFromGitHub>>>(
+			await hostedTags(hosted),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	const cacheKey = buildRepoTagsCacheKey(owner, repo);
 
@@ -2942,6 +3028,13 @@ export async function getLatestRepoRelease(owner: string, repo: string) {
 }
 
 export async function getFileContent(owner: string, repo: string, path: string, ref?: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchFileContentFromGitHub>>>(
+			await hostedFileContent(hosted, path, ref),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	const normalizedRef = normalizeRef(ref);
 	const cacheKey = buildFileContentCacheKey(owner, repo, path, normalizedRef);
@@ -2965,6 +3058,13 @@ export async function getFileContent(owner: string, repo: string, path: string, 
 }
 
 export async function getRepoReadme(owner: string, repo: string, ref?: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoReadmeFromGitHub>>>(
+			await hostedReadme(hosted, ref),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	const normalizedRef = normalizeRef(ref);
 	const cacheKey = buildRepoReadmeCacheKey(owner, repo, normalizedRef);
@@ -2982,6 +3082,13 @@ export async function getRepoReadme(owner: string, repo: string, ref?: string) {
 }
 
 export async function getPullRequest(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchPullRequestFromGitHub>>>(
+			await hostedPull(hosted, pullNumber),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -2996,6 +3103,13 @@ export async function getPullRequest(owner: string, repo: string, pullNumber: nu
 }
 
 export async function getPullRequestFiles(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchPullRequestFilesFromGitHub>>>(
+			await hostedPullFiles(hosted, pullNumber),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -3010,6 +3124,13 @@ export async function getPullRequestFiles(owner: string, repo: string, pullNumbe
 }
 
 export async function getPullRequestComments(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<
+			Awaited<ReturnType<typeof fetchPullRequestCommentsFromGitHub>>
+		>(await hostedPullComments(hosted, pullNumber));
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -3024,6 +3145,13 @@ export async function getPullRequestComments(owner: string, repo: string, pullNu
 }
 
 export async function getPullRequestReviews(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchPullRequestReviewsFromGitHub>>>(
+			await hostedPullReviews(hosted, pullNumber),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -3038,6 +3166,13 @@ export async function getPullRequestReviews(owner: string, repo: string, pullNum
 }
 
 export async function getPullRequestCommits(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<typeof fetchPullRequestCommitsFromGitHub>>>(
+			await hostedPullCommits(hosted, pullNumber),
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -3075,6 +3210,9 @@ export async function getPullRequestReviewThreads(
 	repo: string,
 	pullNumber: number,
 ): Promise<ReviewThread[]> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) return await hostedPullReviewThreads(hosted, pullNumber);
+
 	const token = await getGitHubToken();
 	if (!token) return [];
 
@@ -3735,6 +3873,9 @@ export async function getPullRequestBundle(
 	repo: string,
 	pullNumber: number,
 ): Promise<PRBundleData | null> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) return await hostedPullBundle(hosted, pullNumber);
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -3808,6 +3949,10 @@ export async function getCrossReferences(
 	repo: string,
 	issueNumber: number,
 ): Promise<CrossReference[]> {
+	// Cross references come from the upstream timeline, which says nothing
+	// about pull requests that only exist here.
+	if (await hostedRepo(owner, repo)) return [];
+
 	const octokit = await getOctokit();
 	if (!octokit) return [];
 
@@ -4088,7 +4233,17 @@ export async function getRepoIssues(
 		fallback: [],
 		jobType: "repo_issues",
 		jobPayload: { owner, repo, state },
-		fetchRemote: (octokit) => fetchRepoIssuesFromGitHub(octokit, owner, repo, state),
+		fetchRemote: async (octokit) => {
+			// Issues are the upstream's, even when the code is ours.
+			const upstream = await upstreamRepoRef(owner, repo);
+			if (!upstream) return [];
+			return fetchRepoIssuesFromGitHub(
+				octokit,
+				upstream.owner,
+				upstream.repo,
+				state,
+			);
+		},
 	});
 }
 
@@ -5027,6 +5182,11 @@ export async function getRepoIssuesWithStats(
 		cursor?: string | null;
 	},
 ): Promise<IssuesPageResult> {
+	// Issues stay upstream, so a repo we host asks about its upstream — and one
+	// without an upstream has none to ask about.
+	const upstream = await upstreamRepoRef(owner, repo);
+	if (!upstream) return EMPTY_ISSUES_PAGE_RESULT;
+
 	const token = await getGitHubToken();
 	if (!token) return EMPTY_ISSUES_PAGE_RESULT;
 
@@ -5060,7 +5220,10 @@ export async function getRepoIssuesWithStats(
 				Authorization: `Bearer ${token}`,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ query, variables: { owner, name: repo } }),
+			body: JSON.stringify({
+				query,
+				variables: { owner: upstream.owner, name: upstream.repo },
+			}),
 		});
 
 		if (!response.ok) return EMPTY_ISSUES_PAGE_RESULT;
@@ -5238,6 +5401,14 @@ export async function getRepoPullRequests(
 	repo: string,
 	state: "open" | "closed" | "all" = "open",
 ) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		const { prs } = await hostedPullPage(hosted, state, { perPage: 50 });
+		return asGitHubShape<Awaited<ReturnType<typeof fetchRepoPullRequestsFromGitHub>>>(
+			prs,
+		);
+	}
+
 	const authCtx = await getGitHubAuthContext();
 	return readLocalFirstGitData({
 		authCtx,
@@ -5249,75 +5420,6 @@ export async function getRepoPullRequests(
 		fetchRemote: (octokit) =>
 			fetchRepoPullRequestsFromGitHub(octokit, owner, repo, state),
 	});
-}
-
-export async function enrichPRsWithStats(owner: string, repo: string, prs: { number: number }[]) {
-	if (prs.length === 0)
-		return new Map<
-			number,
-			{ additions: number; deletions: number; changed_files: number }
-		>();
-
-	const token = await getGitHubToken();
-	if (!token)
-		return new Map<
-			number,
-			{ additions: number; deletions: number; changed_files: number }
-		>();
-
-	const prFragments = prs.map(
-		(pr, i) =>
-			`pr${i}: pullRequest(number: ${pr.number}) { number additions deletions changedFiles }`,
-	);
-
-	const query = `query { repository(owner: "${owner}", name: "${repo}") { ${prFragments.join(" ")} } }`;
-
-	try {
-		const response = await fetch("https://api.github.com/graphql", {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${token}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({ query }),
-		});
-
-		if (!response.ok)
-			return new Map<
-				number,
-				{ additions: number; deletions: number; changed_files: number }
-			>();
-
-		const json = await response.json();
-		const repoData = json.data?.repository;
-		if (!repoData)
-			return new Map<
-				number,
-				{ additions: number; deletions: number; changed_files: number }
-			>();
-
-		const map = new Map<
-			number,
-			{ additions: number; deletions: number; changed_files: number }
-		>();
-		for (let i = 0; i < prs.length; i++) {
-			const pr = repoData[`pr${i}`];
-			if (pr) {
-				map.set(pr.number, {
-					additions: pr.additions,
-					deletions: pr.deletions,
-					changed_files: pr.changedFiles,
-				});
-			}
-		}
-		return map;
-	} catch (error) {
-		rethrowKnownGitHubErrors(error);
-		return new Map<
-			number,
-			{ additions: number; deletions: number; changed_files: number }
-		>();
-	}
 }
 
 const PR_LIST_GRAPHQL_STATES = {
@@ -5436,6 +5538,9 @@ export async function getRepoPullRequestsWithStats(
 		cursor?: string | null;
 	},
 ): Promise<PRPageResult> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) return await hostedPullPage(hosted, state, opts);
+
 	const token = await getGitHubToken();
 	if (!token) return EMPTY_PAGE_RESULT;
 
@@ -5593,6 +5698,9 @@ async function fetchCheckStatusForRef(
 	ref: string,
 ): Promise<CheckStatus | null> {
 	if (!octokit) return null;
+	// Repos we host have no CI of their own yet, and the upstream's checks
+	// describe a tree that is no longer the one being reviewed.
+	if (await hostedRepo(owner, repo)) return null;
 
 	let commitStatuses: Awaited<
 		ReturnType<typeof octokit.repos.getCombinedStatusForRef>
@@ -5697,6 +5805,9 @@ export async function batchFetchCheckStatuses(
 	prs: { number: number }[],
 ): Promise<Record<number, CheckStatus>> {
 	if (prs.length === 0) return {};
+	// A pull request of ours has no GitHub checks to roll up, and its number is
+	// ours too — asking GitHub about it would answer for a different one.
+	if (await hostedRepo(owner, repo)) return {};
 
 	const rKey = checkStatusRedisKey(owner, repo);
 	try {
@@ -6966,10 +7077,36 @@ async function fetchRepoPageDataGraphQL(
 	};
 }
 
+/**
+ * Repositories we host answer from Postgres and their git backend, so they need
+ * no GitHub round trip and nothing cached from one — including on the
+ * background revalidation path, which would otherwise refill GitHub-derived
+ * caches for a repo whose truth is ours.
+ */
+async function hostedPageDataResult(
+	owner: string,
+	repo: string,
+	authCtx: GitHubAuthContext,
+): Promise<RepoPageDataResult | null> {
+	const hosted = await hostedRepo(owner, repo);
+	if (!hosted) return null;
+	return {
+		success: true,
+		data: await hostedPageData(hosted, {
+			userId: authCtx.userId,
+			login: authCtx.githubUser?.login ?? null,
+			token: authCtx.token,
+		}),
+	};
+}
+
 export const getRepoPageData = cache(
 	async (owner: string, repo: string): Promise<RepoPageDataResult> => {
 		const authCtx = await getGitHubAuthContext();
 		if (!authCtx) return { success: false, error: "Not authenticated" };
+
+		const hosted = await hostedPageDataResult(owner, repo, authCtx);
+		if (hosted) return hosted;
 
 		const { getCachedRepoPageData } = await import("@/lib/repo-data-cache-vc");
 		const cached = await getCachedRepoPageData<RepoPageData>(
@@ -6989,6 +7126,9 @@ export async function fetchAndCacheRepoPageData(
 ): Promise<RepoPageDataResult> {
 	const authCtx = await getGitHubAuthContext();
 	if (!authCtx) return { success: false, error: "Not authenticated" };
+
+	const hosted = await hostedPageDataResult(owner, repo, authCtx);
+	if (hosted) return hosted;
 
 	try {
 		const result = await fetchRepoPageDataGraphQL(authCtx.token, owner, repo);
@@ -7162,6 +7302,13 @@ export async function getRepoCommits(
 	since?: string,
 	until?: string,
 ) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<Awaited<ReturnType<Octokit["repos"]["listCommits"]>>["data"]>(
+			await hostedCommits(hosted, sha, page, perPage),
+		);
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return [];
 	try {
@@ -7182,6 +7329,13 @@ export async function getRepoCommits(
 }
 
 export async function getCommit(owner: string, repo: string, ref: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		return asGitHubShape<
+			Awaited<ReturnType<Octokit["repos"]["getCommit"]>>["data"] | null
+		>(await hostedCommit(hosted, ref));
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return null;
 	try {
@@ -7270,6 +7424,10 @@ export async function getAuthorDossier(
 	repo: string,
 	authorLogin: string,
 ): Promise<AuthorDossierResult | null> {
+	// The dossier is built from the upstream's contribution history, which a
+	// repo we host does not have one of.
+	if (await hostedRepo(owner, repo)) return null;
+
 	try {
 		const cached = await getCachedAuthorDossier<AuthorDossierResult>(
 			owner,

@@ -11,6 +11,10 @@ import {
 import { getErrorMessage } from "@/lib/utils";
 import { revalidatePath } from "next/cache";
 import { invalidateRepoCache } from "@/lib/repo-data-cache-vc";
+import { hostedPullActor } from "@/lib/pulls/actor";
+import { mergeHostedPull, setHostedPullState, updateHostedPullBranch } from "@/lib/pulls/merge";
+import { commitHostedResolution, resolveHostedConflicts } from "@/lib/pulls/resolve";
+import { hostedRepo } from "@/lib/repos/hosted-source";
 
 type PRMutationScope = "detail" | "list" | "layout";
 
@@ -117,6 +121,50 @@ export async function renamePullRequest(
 
 export type MergeMethod = "merge" | "squash" | "rebase";
 
+/**
+ * Resolves a conflicted pull request without a human picking hunks. The result
+ * is a verified resolution branch held against the pull request, which still has
+ * to be reviewed and merged by a person, so a bad resolution costs a review
+ * rather than the base branch.
+ */
+export async function resolvePRConflictsAutomatically(
+	owner: string,
+	repo: string,
+	pullNumber: number,
+) {
+	const hosted = await hostedMutation(owner, repo);
+	if (!hosted) {
+		return { error: "Automatic resolution is only available on repositories we host" };
+	}
+	if (!hosted.actor) return { error: "Not authenticated" };
+
+	const result = await resolveHostedConflicts(hosted.hosted, hosted.actor, pullNumber).catch(
+		(error: unknown) => ({ ok: false as const, error: getErrorMessage(error) }),
+	);
+	if (!result.ok) return { error: result.error };
+	await revalidateAfterPRMutation(owner, repo, pullNumber, "conflictResolution");
+	return {
+		success: true,
+		sha: result.sha,
+		branch: result.branch,
+		paths: result.paths,
+		agent: result.agent,
+	};
+}
+
+/**
+ * Resolves the actor for a mutation on a pull request we own, or null when the
+ * repository still lives on GitHub. Every hosted branch below needs the same
+ * two things, and getting either wrong would send our pull request number to
+ * GitHub, where it means an unrelated issue.
+ */
+async function hostedMutation(owner: string, repo: string) {
+	const hosted = await hostedRepo(owner, repo);
+	if (!hosted) return null;
+	const actor = await hostedPullActor();
+	return { hosted, actor };
+}
+
 export async function mergePullRequest(
 	owner: string,
 	repo: string,
@@ -124,7 +172,33 @@ export async function mergePullRequest(
 	method: MergeMethod,
 	commitTitle?: string,
 	commitMessage?: string,
+	deleteBranch?: boolean,
 ) {
+	const hosted = await hostedMutation(owner, repo);
+	if (hosted) {
+		if (!hosted.actor) return { error: "Not authenticated" };
+		// A backend that refuses a ref move is a normal outcome here, not a crash:
+		// the pull request stays open and the reason is shown.
+		const result = await mergeHostedPull(hosted.hosted, hosted.actor, {
+			number: pullNumber,
+			strategy: method,
+			title: commitTitle,
+			message: commitMessage,
+			deleteBranch,
+		}).catch((error: unknown) => ({
+			ok: false as const,
+			error: getErrorMessage(error) || "Failed to merge pull request",
+		}));
+		if (!result.ok) return { error: result.error };
+		await revalidateAfterPRMutation(owner, repo, pullNumber, "merge");
+		// A restack moves other pull requests in the stack, so their pages are
+		// stale too.
+		for (const child of result.restacked) {
+			revalidatePath(`/repos/${owner}/${repo}/pulls/${child.number}`);
+		}
+		return { success: true, restacked: result.restacked };
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return { error: "Not authenticated" };
 
@@ -145,6 +219,20 @@ export async function mergePullRequest(
 }
 
 export async function closePullRequest(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedMutation(owner, repo);
+	if (hosted) {
+		if (!hosted.actor) return { error: "Not authenticated" };
+		const result = await setHostedPullState(
+			hosted.hosted,
+			hosted.actor,
+			pullNumber,
+			"closed",
+		);
+		if (!result.ok) return { error: result.error };
+		await revalidateAfterPRMutation(owner, repo, pullNumber, "close");
+		return { success: true };
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return { error: "Not authenticated" };
 
@@ -163,6 +251,20 @@ export async function closePullRequest(owner: string, repo: string, pullNumber: 
 }
 
 export async function reopenPullRequest(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedMutation(owner, repo);
+	if (hosted) {
+		if (!hosted.actor) return { error: "Not authenticated" };
+		const result = await setHostedPullState(
+			hosted.hosted,
+			hosted.actor,
+			pullNumber,
+			"open",
+		);
+		if (!result.ok) return { error: result.error };
+		await revalidateAfterPRMutation(owner, repo, pullNumber, "reopen");
+		return { success: true };
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return { error: "Not authenticated" };
 
@@ -181,6 +283,19 @@ export async function reopenPullRequest(owner: string, repo: string, pullNumber:
 }
 
 export async function updatePRBranch(owner: string, repo: string, pullNumber: number) {
+	const hosted = await hostedMutation(owner, repo);
+	if (hosted) {
+		if (!hosted.actor) return { error: "Not authenticated" };
+		const result = await updateHostedPullBranch(
+			hosted.hosted,
+			hosted.actor,
+			pullNumber,
+		);
+		if (!result.ok) return { error: result.error };
+		await revalidateAfterPRMutation(owner, repo, pullNumber, "updateBranch");
+		return { success: true };
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return { error: "Not authenticated" };
 
@@ -668,6 +783,24 @@ export async function commitMergeConflictResolution(
 	headRepoOwner?: string | null,
 	headRepoName?: string | null,
 ) {
+	const hosted = await hostedMutation(owner, repo);
+	if (hosted) {
+		if (!hosted.actor) return { error: "Not authenticated" };
+		const result = await commitHostedResolution(
+			hosted.hosted,
+			hosted.actor,
+			pullNumber,
+			resolvedFiles,
+			commitMessage,
+		).catch((error: unknown) => ({
+			ok: false as const,
+			error: getErrorMessage(error) || "Failed to commit resolution",
+		}));
+		if (!result.ok) return { error: result.error };
+		await revalidateAfterPRMutation(owner, repo, pullNumber, "conflictResolution");
+		return { success: true };
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return { error: "Not authenticated" };
 

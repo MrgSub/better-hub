@@ -35,6 +35,14 @@ interface ContentViewedData {
 	}[];
 }
 
+/**
+ * Embedding a viewed page is best-effort, so a missing event key or an Inngest
+ * outage must not surface as an unhandled rejection on the render.
+ */
+export function reportContentViewed(data: ContentViewedData): void {
+	void inngest.send({ name: "app/content.viewed", data }).catch(() => {});
+}
+
 export const embedContent = inngest.createFunction(
 	{
 		id: "embed-content",

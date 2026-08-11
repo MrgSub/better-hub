@@ -3,6 +3,8 @@
 import { getOctokit, getGitHubToken } from "@/lib/github";
 import { renderMarkdownToHtml } from "@/components/shared/markdown-renderer";
 import { setCachedReadmeHtml } from "@/lib/readme-cache";
+import { hostedBranches, hostedReadme, hostedRepo, hostedTags } from "@/lib/repos/hosted-source";
+import { parseLanguages } from "@/lib/repos/upstream-metadata";
 import {
 	setCachedRepoLanguages,
 	setCachedContributorAvatars,
@@ -12,34 +14,11 @@ import {
 	type BranchRef,
 } from "@/lib/repo-data-cache";
 
-export async function revalidateReadme(
-	owner: string,
-	repo: string,
-	branch: string,
-): Promise<string | null> {
-	const octokit = await getOctokit();
-	if (!octokit) return null;
+/** Hosted repos read their README from our git backend; the rest from GitHub. */
+async function readReadme(owner: string, repo: string, branch: string): Promise<string | null> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) return (await hostedReadme(hosted, branch))?.content ?? null;
 
-	try {
-		const { data } = await octokit.repos.getReadme({
-			owner,
-			repo,
-			ref: branch,
-		});
-		const content = Buffer.from(data.content, "base64").toString("utf-8");
-		const html = await renderMarkdownToHtml(content, { owner, repo, branch });
-		await setCachedReadmeHtml(owner, repo, html);
-		return html;
-	} catch {
-		return null;
-	}
-}
-
-export async function fetchReadmeMarkdown(
-	owner: string,
-	repo: string,
-	branch: string,
-): Promise<string | null> {
 	const octokit = await getOctokit();
 	if (!octokit) return null;
 
@@ -55,16 +34,45 @@ export async function fetchReadmeMarkdown(
 	}
 }
 
+export async function revalidateReadme(
+	owner: string,
+	repo: string,
+	branch: string,
+): Promise<string | null> {
+	const content = await readReadme(owner, repo, branch);
+	if (content === null) return null;
+
+	const html = await renderMarkdownToHtml(content, { owner, repo, branch });
+	await setCachedReadmeHtml(owner, repo, html);
+	return html;
+}
+
+export async function fetchReadmeMarkdown(
+	owner: string,
+	repo: string,
+	branch: string,
+): Promise<string | null> {
+	return readReadme(owner, repo, branch);
+}
+
 export async function revalidateLanguages(
 	owner: string,
 	repo: string,
 ): Promise<Record<string, number> | null> {
+	const hosted = await hostedRepo(owner, repo);
+	const languages = hosted ? parseLanguages(hosted.record) : await readLanguages(owner, repo);
+	if (!languages) return null;
+
+	await setCachedRepoLanguages(owner, repo, languages);
+	return languages;
+}
+
+async function readLanguages(owner: string, repo: string): Promise<Record<string, number> | null> {
 	const octokit = await getOctokit();
 	if (!octokit) return null;
 
 	try {
 		const { data } = await octokit.repos.listLanguages({ owner, repo });
-		await setCachedRepoLanguages(owner, repo, data);
 		return data;
 	} catch {
 		return null;
@@ -106,6 +114,17 @@ export async function revalidateContributorAvatars(
 }
 
 export async function revalidateBranches(owner: string, repo: string): Promise<BranchRef[] | null> {
+	// The picker refreshes itself on the client, so a hosted repo would ask
+	// GitHub for refs only we have — 404 there, and the repo name on the wire.
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		const branches: BranchRef[] = (await hostedBranches(hosted)).map((b) => ({
+			name: b.name,
+		}));
+		await setCachedBranches(owner, repo, branches);
+		return branches;
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return null;
 
@@ -124,6 +143,13 @@ export async function revalidateBranches(owner: string, repo: string): Promise<B
 }
 
 export async function revalidateTags(owner: string, repo: string): Promise<BranchRef[] | null> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		const tags: BranchRef[] = (await hostedTags(hosted)).map((t) => ({ name: t.name }));
+		await setCachedTags(owner, repo, tags);
+		return tags;
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return null;
 

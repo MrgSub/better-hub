@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import {
 	AlertTriangle,
 	Archive,
+	ArchiveRestore,
 	ChevronDown,
 	ExternalLink,
 	Eye,
@@ -20,11 +21,12 @@ import {
 	X,
 	Check,
 } from "lucide-react";
+import { SaveFooter, SectionCard, SectionHeader, Toggle } from "@/components/settings/primitives";
 import {
 	updateRepoSettings,
 	updateRepoTopics,
 	updateDefaultBranch,
-	archiveRepository,
+	setRepositoryArchived,
 	deleteRepository,
 } from "@/app/(app)/repos/[owner]/[repo]/settings/actions";
 
@@ -49,183 +51,17 @@ interface RepoData {
 interface RepoSettingsProps {
 	owner: string;
 	repo: string;
+	/**
+	 * Whether we own the repository's git data. What we offer and what GitHub
+	 * does diverge here: issues stay upstream and merge strategies are whatever
+	 * the backend can really perform, so those settings are GitHub's alone.
+	 */
+	hosted: boolean;
 	repoData: RepoData;
 	branches: string[];
 }
 
 /* ─── Primitives ─────────────────────────────────────────────── */
-
-function Toggle({
-	checked,
-	onChange,
-	disabled,
-}: {
-	checked: boolean;
-	onChange: (v: boolean) => void;
-	disabled?: boolean;
-}) {
-	return (
-		<button
-			type="button"
-			role="switch"
-			aria-checked={checked}
-			disabled={disabled}
-			onClick={() => onChange(!checked)}
-			className={cn(
-				"relative inline-flex h-[18px] w-8 shrink-0 items-center rounded-full transition-colors cursor-pointer",
-				checked ? "bg-foreground" : "bg-muted-foreground/20",
-				disabled && "opacity-40 cursor-not-allowed",
-			)}
-		>
-			<span
-				className={cn(
-					"pointer-events-none block h-3 w-3 rounded-full transition-all duration-200",
-					checked
-						? "translate-x-[17px] bg-background"
-						: "translate-x-[3px] bg-muted-foreground/60",
-				)}
-			/>
-		</button>
-	);
-}
-
-function SectionCard({
-	children,
-	variant = "default",
-	dashed = false,
-	className,
-}: {
-	children: React.ReactNode;
-	variant?: "default" | "danger";
-	dashed?: boolean;
-	className?: string;
-}) {
-	return (
-		<section
-			className={cn(
-				"relative rounded-md p-4 overflow-hidden",
-				dashed ? "border border-dashed" : "border",
-				variant === "danger" ? "border-destructive/15" : "border-border/30",
-				className,
-			)}
-		>
-			{children}
-		</section>
-	);
-}
-
-function SectionHeader({
-	icon: Icon,
-	title,
-	description,
-	variant = "default",
-}: {
-	icon: React.ComponentType<{ className?: string }>;
-	title: string;
-	description?: string;
-	variant?: "default" | "danger";
-}) {
-	return (
-		<div className="mb-4">
-			<div className="flex items-center gap-2">
-				<div
-					className={cn(
-						"flex items-center justify-center w-6 h-6 rounded border",
-						variant === "danger"
-							? "border-destructive/20 bg-destructive/5"
-							: "border-border/40 bg-muted/50 dark:bg-white/[0.03]",
-					)}
-				>
-					<Icon
-						className={cn(
-							"w-3 h-3",
-							variant === "danger"
-								? "text-destructive/60"
-								: "text-muted-foreground/50",
-						)}
-					/>
-				</div>
-				<div>
-					<h3
-						className={cn(
-							"text-xs font-medium",
-							variant === "danger"
-								? "text-destructive/80"
-								: "text-foreground/90",
-						)}
-					>
-						{title}
-					</h3>
-					{description && (
-						<p className="text-[10px] text-muted-foreground mt-0.5">
-							{description}
-						</p>
-					)}
-				</div>
-			</div>
-		</div>
-	);
-}
-
-function SaveFooter({
-	onClick,
-	pending,
-	disabled,
-	error,
-	success,
-}: {
-	onClick: () => void;
-	pending: boolean;
-	disabled?: boolean;
-	error: string | null;
-	success: string | null;
-}) {
-	return (
-		<div className="flex items-center gap-3 mt-4 pt-3 border-t border-dashed border-border/25">
-			<button
-				onClick={onClick}
-				disabled={pending || disabled}
-				className={cn(
-					"inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-medium transition-all cursor-pointer",
-					pending || disabled
-						? "bg-muted/50 text-muted-foreground/25 cursor-not-allowed"
-						: "bg-foreground text-background hover:opacity-90 active:scale-[0.98]",
-				)}
-			>
-				{pending ? (
-					<>
-						<svg
-							className="w-3 h-3 animate-spin"
-							viewBox="0 0 16 16"
-							fill="none"
-						>
-							<circle
-								cx="8"
-								cy="8"
-								r="6"
-								stroke="currentColor"
-								strokeWidth="2"
-								strokeDasharray="28"
-								strokeDashoffset="8"
-								strokeLinecap="round"
-							/>
-						</svg>
-						Saving...
-					</>
-				) : (
-					"Save changes"
-				)}
-			</button>
-			{error && <span className="text-[10px] text-destructive/80">{error}</span>}
-			{success && (
-				<span className="inline-flex items-center gap-1 text-[10px] text-emerald-500/80">
-					<Check className="w-3 h-3" />
-					{success}
-				</span>
-			)}
-		</div>
-	);
-}
 
 function ToggleRow({
 	label,
@@ -267,7 +103,7 @@ function ToggleRow({
 
 /* ─── Main Component ─────────────────────────────────────────── */
 
-export function RepoSettings({ owner, repo, repoData, branches }: RepoSettingsProps) {
+export function RepoSettings({ owner, repo, hosted, repoData, branches }: RepoSettingsProps) {
 	const router = useRouter();
 
 	// General
@@ -338,15 +174,15 @@ export function RepoSettings({ owner, repo, repoData, branches }: RepoSettingsPr
 		startGeneralTransition(async () => {
 			const result = await updateRepoSettings(owner, repo, {
 				name: name !== repoData.name ? name : undefined,
-				description: description || undefined,
-				homepage: homepage || undefined,
+				description,
+				homepage,
 				private: isPrivate,
 			});
 			if (result.success) {
 				setConfirmVisibility(false);
 				setGeneralSuccess("Settings saved");
 				if (result.newName && result.newName !== repo) {
-					router.push(`/${owner}/${result.newName}/settings`);
+					router.push(`/repos/${owner}/${result.newName}/settings`);
 				} else {
 					router.refresh();
 				}
@@ -427,18 +263,19 @@ export function RepoSettings({ owner, repo, repoData, branches }: RepoSettingsPr
 		});
 	}
 
-	function handleArchive() {
-		if (!confirmArchive) {
+	function handleArchive(archived: boolean) {
+		if (archived && !confirmArchive) {
 			setConfirmArchive(true);
 			return;
 		}
 		setDangerError(null);
 		startDangerTransition(async () => {
-			const result = await archiveRepository(owner, repo);
+			const result = await setRepositoryArchived(owner, repo, archived);
 			if (result.success) {
+				setConfirmArchive(false);
 				router.refresh();
 			} else {
-				setDangerError(result.error ?? "Failed to archive");
+				setDangerError(result.error ?? "Failed to update");
 			}
 		});
 	}
@@ -600,8 +437,8 @@ export function RepoSettings({ owner, repo, repoData, branches }: RepoSettingsPr
 				/>
 			</SectionCard>
 
-			{/* ── Social Preview (public repos only) ── */}
-			{!repoData.private && (
+			{/* ── Social Preview (public repos on GitHub only) ── */}
+			{!hosted && !repoData.private && (
 				<SectionCard dashed>
 					<div className="flex items-center gap-4">
 						<div className="w-32 shrink-0 rounded border border-border/25 overflow-hidden bg-muted/20 dark:bg-white/[0.015]">
@@ -803,122 +640,127 @@ export function RepoSettings({ owner, repo, repoData, branches }: RepoSettingsPr
 				/>
 			</SectionCard>
 
-			{/* ── Features & Merge side-by-side on larger screens ── */}
-			<div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-				{/* Features */}
-				<SectionCard>
-					<SectionHeader
-						icon={Layers}
-						title="Features"
-						description="Toggle repository capabilities"
-					/>
-					<div className="rounded-md border border-border/25 overflow-hidden">
-						{(
-							[
+			{/* ── Features & Merge side-by-side on larger screens ──
+			    Both are GitHub's to answer: issues live upstream, and which merge
+			    strategies a repository we host offers is a property of its git
+			    backend rather than a preference. ── */}
+			{!hosted && (
+				<div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+					{/* Features */}
+					<SectionCard>
+						<SectionHeader
+							icon={Layers}
+							title="Features"
+							description="Toggle repository capabilities"
+						/>
+						<div className="rounded-md border border-border/25 overflow-hidden">
+							{(
 								[
-									"has_wiki",
-									"Wikis",
-									"Collaborative documentation pages",
-								],
-								[
-									"has_issues",
-									"Issues",
-									"Track bugs and feature requests",
-								],
-								[
-									"has_projects",
-									"Projects",
-									"Organize work with boards",
-								],
-								[
-									"has_discussions",
-									"Discussions",
-									"Community conversations and Q&A",
-								],
-							] as const
-						).map(([key, label, desc], i, arr) => (
-							<ToggleRow
-								key={key}
-								label={label}
-								description={desc}
-								checked={features[key]}
-								disabled={isArchived}
-								onChange={(v) =>
-									setFeatures({
-										...features,
-										[key]: v,
-									})
-								}
-								last={i === arr.length - 1}
-							/>
-						))}
-					</div>
-					<SaveFooter
-						onClick={handleSaveFeatures}
-						pending={featuresPending}
-						disabled={!featuresHasChanges || isArchived}
-						error={featuresError}
-						success={featuresSuccess}
-					/>
-				</SectionCard>
+									[
+										"has_wiki",
+										"Wikis",
+										"Collaborative documentation pages",
+									],
+									[
+										"has_issues",
+										"Issues",
+										"Track bugs and feature requests",
+									],
+									[
+										"has_projects",
+										"Projects",
+										"Organize work with boards",
+									],
+									[
+										"has_discussions",
+										"Discussions",
+										"Community conversations and Q&A",
+									],
+								] as const
+							).map(([key, label, desc], i, arr) => (
+								<ToggleRow
+									key={key}
+									label={label}
+									description={desc}
+									checked={features[key]}
+									disabled={isArchived}
+									onChange={(v) =>
+										setFeatures({
+											...features,
+											[key]: v,
+										})
+									}
+									last={i === arr.length - 1}
+								/>
+							))}
+						</div>
+						<SaveFooter
+							onClick={handleSaveFeatures}
+							pending={featuresPending}
+							disabled={!featuresHasChanges || isArchived}
+							error={featuresError}
+							success={featuresSuccess}
+						/>
+					</SectionCard>
 
-				{/* Merge Settings */}
-				<SectionCard>
-					<SectionHeader
-						icon={GitMerge}
-						title="Merge Settings"
-						description="Configure pull request merge behavior"
-					/>
-					<div className="rounded-md border border-border/25 overflow-hidden">
-						{(
-							[
+					{/* Merge Settings */}
+					<SectionCard>
+						<SectionHeader
+							icon={GitMerge}
+							title="Merge Settings"
+							description="Configure pull request merge behavior"
+						/>
+						<div className="rounded-md border border-border/25 overflow-hidden">
+							{(
 								[
-									"allow_merge_commit",
-									"Merge commits",
-									"Combine all commits into one",
-								],
-								[
-									"allow_squash_merge",
-									"Squash merging",
-									"Squash into a single commit",
-								],
-								[
-									"allow_rebase_merge",
-									"Rebase merging",
-									"Rebase onto the base branch",
-								],
-								[
-									"delete_branch_on_merge",
-									"Auto-delete branches",
-									"Delete branches after merge",
-								],
-							] as const
-						).map(([key, label, desc], i, arr) => (
-							<ToggleRow
-								key={key}
-								label={label}
-								description={desc}
-								checked={mergeSettings[key]}
-								disabled={isArchived}
-								onChange={(v) =>
-									setMergeSettings({
-										...mergeSettings,
-										[key]: v,
-									})
-								}
-								last={i === arr.length - 1}
-							/>
-						))}
-					</div>
-					<SaveFooter
-						onClick={handleSaveMerge}
-						pending={mergePending}
-						disabled={!mergeHasChanges || isArchived}
-						error={mergeError}
-						success={mergeSuccess}
-					/>
-				</SectionCard>
-			</div>
+									[
+										"allow_merge_commit",
+										"Merge commits",
+										"Combine all commits into one",
+									],
+									[
+										"allow_squash_merge",
+										"Squash merging",
+										"Squash into a single commit",
+									],
+									[
+										"allow_rebase_merge",
+										"Rebase merging",
+										"Rebase onto the base branch",
+									],
+									[
+										"delete_branch_on_merge",
+										"Auto-delete branches",
+										"Delete branches after merge",
+									],
+								] as const
+							).map(([key, label, desc], i, arr) => (
+								<ToggleRow
+									key={key}
+									label={label}
+									description={desc}
+									checked={mergeSettings[key]}
+									disabled={isArchived}
+									onChange={(v) =>
+										setMergeSettings({
+											...mergeSettings,
+											[key]: v,
+										})
+									}
+									last={i === arr.length - 1}
+								/>
+							))}
+						</div>
+						<SaveFooter
+							onClick={handleSaveMerge}
+							pending={mergePending}
+							disabled={!mergeHasChanges || isArchived}
+							error={mergeError}
+							success={mergeSuccess}
+						/>
+					</SectionCard>
+				</div>
+			)}
 
 			{/* ── Danger Zone ── */}
 			<SectionCard variant="danger">
@@ -950,10 +792,31 @@ export function RepoSettings({ owner, repo, repoData, branches }: RepoSettingsPr
 								<p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
 									{isArchived
 										? "This repository is archived and read-only."
-										: "Mark as archived and read-only. Can be reversed by GitHub support."}
+										: hosted
+											? "Mark as archived and read-only. You can undo this here."
+											: "Mark as archived and read-only. Can be reversed by GitHub support."}
 								</p>
 							</div>
-							{!isArchived && (
+							{/* Unarchiving is a GitHub support request, so only a
+							    repository we host offers it. */}
+							{isArchived ? (
+								hosted && (
+									<button
+										onClick={() =>
+											handleArchive(
+												false,
+											)
+										}
+										disabled={
+											dangerPending
+										}
+										className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border/30 px-3 py-1.5 text-xs font-medium text-muted-foreground/70 transition-all hover:border-border/50 hover:text-foreground/85 cursor-pointer"
+									>
+										<ArchiveRestore className="w-3 h-3" />
+										Unarchive
+									</button>
+								)
+							) : (
 								<div className="flex items-center gap-2 shrink-0">
 									{confirmArchive && (
 										<button
@@ -968,8 +831,10 @@ export function RepoSettings({ owner, repo, repoData, branches }: RepoSettingsPr
 										</button>
 									)}
 									<button
-										onClick={
-											handleArchive
+										onClick={() =>
+											handleArchive(
+												true,
+											)
 										}
 										disabled={
 											dangerPending

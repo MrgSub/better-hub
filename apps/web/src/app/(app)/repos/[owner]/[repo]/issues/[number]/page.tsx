@@ -23,7 +23,7 @@ import { TrackView } from "@/components/shared/track-view";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { inngest } from "@/lib/inngest";
+import { reportContentViewed } from "@/lib/inngest";
 import { isItemPinned } from "@/lib/pinned-items-store";
 
 export async function generateMetadata({
@@ -107,25 +107,22 @@ export default async function IssueDetailPage({
 
 	// Fire-and-forget: embed issue content for semantic search
 	if (session?.user?.id) {
-		void inngest.send({
-			name: "app/content.viewed",
-			data: {
-				userId: session.user.id,
-				contentType: "issue",
-				owner,
-				repo,
-				number: issueNumber,
-				title: issue.title,
-				body: issue.body ?? "",
-				comments: (comments || [])
-					.filter((c) => c.body)
-					.map((c) => ({
-						id: c.id,
-						body: c.body,
-						author: c.user?.login ?? "unknown",
-						createdAt: c.created_at,
-					})),
-			},
+		reportContentViewed({
+			userId: session.user.id,
+			contentType: "issue",
+			owner,
+			repo,
+			number: issueNumber,
+			title: issue.title,
+			body: issue.body ?? "",
+			comments: (comments || [])
+				.filter((c) => c.body)
+				.map((c) => ({
+					id: c.id,
+					body: c.body ?? "",
+					author: c.user?.login ?? "unknown",
+					createdAt: c.created_at,
+				})),
 		});
 	}
 

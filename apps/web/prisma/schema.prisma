@@ -12,6 +12,9 @@ model User {
   id             String   @id
   name           String
   email          String
+  /// Written on every sign-in; declared here so the handle in a URL can be
+  /// resolved to the user it belongs to.
+  githubLogin    String?
   githubPat      String?
   onboardingDone Boolean  @default(false)
   emailVerified  Boolean
@@ -24,6 +27,10 @@ model User {
   usageLogs    UsageLog[]
   aiCallLogs   AiCallLog[]
   creditLedger CreditLedger[]
+  organizations OrganizationMember[]
+  repositories  Repository[]
+  collaborations RepositoryCollaborator[]
+  agentConnection AgentConnection?
 
   aiMessageCount Int       @default(0)
   lastActiveAt   DateTime?
@@ -109,6 +116,283 @@ model Subscription {
   stripeScheduleId     String?
 
   @@map("subscription")
+}
+
+/// A GitHub organization we mirror so its members inherit access to the
+/// repositories imported under it.
+model Organization {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  githubLogin String   @unique
+  createdAt   DateTime @default(now())
+
+  members      OrganizationMember[]
+  repositories Repository[]
+  agent        AgentConnection?
+
+  @@map("organizations")
+}
+
+/// The coding agent a namespace resolves merge conflicts with. Off unless an
+/// admin turns it on, because resolving costs money and trust: it belongs to
+/// whoever owns the repositories, not to the deployment.
+///
+/// Exactly one of `organizationId` / `userId` is set — an organization's
+/// repositories and a person's own repositories are the two namespaces a
+/// repository can belong to, and both connect an agent the same way.
+///
+/// No git credential is stored, and none is needed: an agent is handed
+/// conflicted text and answers with file contents, while every ref is written
+/// by us through `GitProvider`.
+model AgentConnection {
+  id String @id @default(cuid())
+
+  organizationId String? @unique
+  userId         String? @unique
+
+  /// "model" (the app's own keys), "devin", or "cursor".
+  provider String  @default("model")
+  enabled  Boolean @default(false)
+  /// Encrypted with the auth secret, like the OAuth tokens; null for "model",
+  /// which spends the requesting user's own model credits instead.
+  apiKeyEnc String?
+  /// The account the key acts in, when the provider's api is scoped to one:
+  /// Devin puts its organization id in the path. Not a secret.
+  accountId String?
+
+  connectedById String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("agent_connections")
+}
+
+model OrganizationMember {
+  organizationId String
+  userId         String
+  /// "admin" or "member", seeded from the caller's GitHub org role.
+  role           String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, userId])
+  @@index([userId])
+  @@map("organization_members")
+}
+
+/// A repository on our git plane. `upstream*` is set only on the canonical
+/// import of a GitHub repo, so the unique index below is what stops a second
+/// importer from creating a duplicate copy; forks point at `forkOf` instead.
+model Repository {
+  id             String   @id @default(cuid())
+  owner          String
+  name           String
+  defaultBranch  String
+  gitBackend     String
+  gitRepoId      String
+  description    String?
+  homepage       String?
+  topics         String[] @default([])
+  isPrivate      Boolean  @default(false)
+  archived       Boolean  @default(false)
+  /// Checkout size as GitHub reports it, so the overview can show one.
+  sizeKb         Int      @default(0)
+  /// Read-only data GitHub still owns, copied here so the overview keeps
+  /// rendering it while GitHub is down.
+  stars            Int       @default(0)
+  watchers         Int       @default(0)
+  openIssues       Int       @default(0)
+  language         String?
+  licenseName      String?
+  licenseSpdx      String?
+  languagesJson    String?
+  metadataSyncedAt DateTime?
+  /// Issues live upstream while pull requests are ours, so both share one
+  /// counter — seeded above the upstream's highest number so `#123` is never
+  /// ambiguous and old links keep resolving.
+  nextNumber       Int       @default(1)
+  upstreamHost   String?
+  upstreamOwner  String?
+  upstreamName   String?
+  forkOfId       String?
+  ownerUserId    String?
+  organizationId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  forkOf        Repository?              @relation("RepositoryForks", fields: [forkOfId], references: [id], onDelete: SetNull)
+  forks         Repository[]             @relation("RepositoryForks")
+  ownerUser     User?                    @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  organization  Organization?            @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  collaborators RepositoryCollaborator[]
+  pullRequests  PullRequest[]
+
+  @@unique([owner, name])
+  @@unique([upstreamHost, upstreamOwner, upstreamName])
+  @@index([ownerUserId])
+  @@index([organizationId])
+  @@map("repositories")
+}
+
+/// Serialises the writes that move a repository's refs. A lease rather than a
+/// database lock, because the work it guards is backend network calls: holding
+/// a transaction open across those would tie a connection to a remote round
+/// trip, and a rollback could not undo a ref the backend already moved. The
+/// expiry is what releases it when a process dies mid-merge.
+model RepositoryLock {
+  repositoryId String   @id
+  /// Identifies the holder in logs; not used for correctness.
+  holder       String
+  expiresAt    DateTime
+  acquiredAt   DateTime @default(now())
+
+  @@map("repository_locks")
+}
+
+model RepositoryCollaborator {
+  repositoryId String
+  userId       String
+  /// "admin", "write" or "read", mapped from the upstream permission.
+  permission   String
+  createdAt    DateTime @default(now())
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([repositoryId, userId])
+  @@index([userId])
+  @@map("repository_collaborators")
+}
+
+/// A pull request we own: the branches live in our git backend, so the merge
+/// has to happen there too. Author identity is denormalised so the
+/// GitHub-shaped payload the pull request pages consume needs no user join.
+model PullRequest {
+  id           String  @id @default(cuid())
+  repositoryId String
+  number       Int
+  title        String
+  bodyMd       String  @default("")
+  /// "open", "merged" or "closed".
+  state        String  @default("open")
+  draft        Boolean @default(false)
+
+  headBranch   String
+  baseBranch   String
+  /// Tip we last compared; a newer branch head means the diff is stale.
+  headSha      String
+  baseSha      String
+  mergeSha     String?
+  /// Diff size at `headSha`, so a list of 20 pull requests is one query.
+  additions    Int     @default(0)
+  deletions    Int     @default(0)
+  changedFiles Int     @default(0)
+
+  /// A verified conflict resolution waiting for a human to merge it: a branch
+  /// off the base carrying the merged tree, so merging the pull request lands
+  /// that instead of a head branch the backend refuses.
+  resolutionBranch String?
+  resolutionSha    String?
+  /// Who produced it: an agent's name, or "manual".
+  resolutionBy     String?
+
+  /// Stacks: the pull request whose head branch this one is based on.
+  parentId String?
+  /// Shared by every pull request in one stack, so it is a single query.
+  stackId  String?
+
+  authorId        String
+  authorLogin     String?
+  authorName      String?
+  authorAvatarUrl String?
+  mergedById      String?
+  mergedAt        DateTime?
+  closedAt        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  repository Repository           @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  parent     PullRequest?         @relation("PullRequestStack", fields: [parentId], references: [id], onDelete: SetNull)
+  children   PullRequest[]        @relation("PullRequestStack")
+  reviews    PullRequestReview[]
+  comments   PullRequestComment[]
+  events     PullRequestEvent[]
+
+  @@unique([repositoryId, number])
+  @@index([repositoryId, state])
+  @@index([stackId])
+  @@map("pull_requests")
+}
+
+model PullRequestReview {
+  id                String   @id @default(cuid())
+  pullRequestId     String
+  reviewerId        String
+  reviewerLogin     String?
+  reviewerName      String?
+  reviewerAvatarUrl String?
+  /// "approved", "changes_requested" or "commented".
+  state             String
+  bodyMd            String   @default("")
+  commitSha         String
+  createdAt         DateTime @default(now())
+
+  pullRequest PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@index([pullRequestId, createdAt])
+  @@map("pull_request_reviews")
+}
+
+/// One row for both conversation and review comments: a review comment is one
+/// anchored to a path and line.
+model PullRequestComment {
+  id              String    @id @default(cuid())
+  pullRequestId   String
+  authorId        String
+  authorLogin     String?
+  authorName      String?
+  authorAvatarUrl String?
+  bodyMd          String
+  path            String?
+  line            Int?
+  /// "LEFT" or "RIGHT" for an anchored comment.
+  side            String?
+  commitSha       String?
+  diffHunk        String?
+  inReplyToId     String?
+  resolvedAt      DateTime?
+  resolvedById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  pullRequest PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@index([pullRequestId, createdAt])
+  @@map("pull_request_comments")
+}
+
+/// The timeline, and the audit trail for anything an agent does: a resolution
+/// can always be traced back to the run that produced it.
+model PullRequestEvent {
+  id            String   @id @default(cuid())
+  pullRequestId String
+  /// "opened", "pushed", "rebased", "merged", "closed", "reopened",
+  /// "conflict_resolved", ...
+  kind          String
+  payloadJson   String?
+  actorId       String?
+  actorLogin    String?
+  createdAt     DateTime @default(now())
+
+  pullRequest PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@index([pullRequestId, createdAt])
+  @@map("pull_request_events")
 }
 
 model GithubCacheEntry {

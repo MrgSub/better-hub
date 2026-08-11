@@ -1,6 +1,10 @@
 "use server";
 
 import { getOctokit, invalidateRepoPullRequestsCache } from "@/lib/github";
+import { hostedPullActor } from "@/lib/pulls/actor";
+import { createHostedPull } from "@/lib/pulls/create";
+import { hostedCompare } from "@/lib/pulls/hosted-source";
+import { hostedBranches, hostedRepo, type HostedRepo } from "@/lib/repos/hosted-source";
 import { getErrorMessage } from "@/lib/utils";
 import { revalidatePath } from "next/cache";
 import { invalidateRepoCache } from "@/lib/repo-data-cache-vc";
@@ -34,6 +38,15 @@ export async function compareBranches(
 	base: string,
 	head: string,
 ): Promise<{ success: boolean; data?: CompareResult; error?: string }> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		try {
+			return { success: true, data: await hostedCompare(hosted, base, head) };
+		} catch (err: unknown) {
+			return { success: false, error: getErrorMessage(err) };
+		}
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return { success: false, error: "Not authenticated" };
 
@@ -89,6 +102,26 @@ export async function createPullRequest(
 	base: string,
 	draft?: boolean,
 ): Promise<{ success: boolean; number?: number; error?: string }> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		const actor = await hostedPullActor();
+		if (!actor) return { success: false, error: "Not authenticated" };
+
+		const result = await createHostedPull(hosted, actor, {
+			title,
+			body,
+			head,
+			base,
+			draft,
+		});
+		if (!result.ok) return { success: false, error: result.error };
+
+		invalidateRepoCache(owner, repo);
+		revalidatePath(`/repos/${owner}/${repo}/pulls`);
+		revalidatePath(`/repos/${owner}/${repo}`, "layout");
+		return { success: true, number: result.pullRequest.number };
+	}
+
 	const octokit = await getOctokit();
 	if (!octokit) return { success: false, error: "Not authenticated" };
 
@@ -153,7 +186,27 @@ async function listBranchesForRepo(
 	return branches;
 }
 
+/** Hosted repositories have no forks on GitHub to offer as head branches. */
+async function hostedBranchInfos(h: HostedRepo): Promise<BranchInfo[]> {
+	const branches = await hostedBranches(h);
+	return branches
+		.map((b) => ({
+			name: b.name,
+			isDefault: b.name === h.defaultBranch,
+			owner: h.ref.owner,
+			repo: h.ref.repo,
+		}))
+		.sort((a, b) => {
+			if (a.isDefault) return -1;
+			if (b.isDefault) return 1;
+			return a.name.localeCompare(b.name);
+		});
+}
+
 export async function fetchBranches(owner: string, repo: string): Promise<BranchInfo[]> {
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) return await hostedBranchInfos(hosted);
+
 	const octokit = await getOctokit();
 	if (!octokit) return [];
 

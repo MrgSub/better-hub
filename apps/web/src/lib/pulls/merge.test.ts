@@ -1,0 +1,487 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PullRequest, Repository } from "@/generated/prisma/client";
+import type { GitProvider } from "@/lib/git/provider";
+import type { MergeResult } from "@/lib/git/types";
+import type { HostedRepo } from "@/lib/repos/hosted-source";
+
+vi.mock("@/lib/db", () => ({
+	prisma: {
+		// The repository lease: taking it succeeds, releasing it is a no-op.
+		$executeRaw: vi.fn().mockResolvedValue(1),
+		pullRequest: {
+			findFirst: vi.fn(),
+			findMany: vi.fn(),
+			update: vi.fn(),
+			count: vi.fn(),
+		},
+		pullRequestEvent: { create: vi.fn() },
+	},
+}));
+vi.mock("@/lib/repos/registry", () => ({ repositoryPermission: vi.fn() }));
+
+import { prisma } from "@/lib/db";
+import { repositoryPermission } from "@/lib/repos/registry";
+import { mergeHostedPull } from "./merge";
+
+const actor = { userId: "user_1", login: "adam", name: "Adam", avatarUrl: null };
+
+function pull(over: Partial<PullRequest> = {}): PullRequest {
+	return {
+		id: "pr_1",
+		number: 7,
+		repositoryId: "repo_1",
+		title: "Add a thing",
+		bodyMd: "",
+		state: "open",
+		draft: false,
+		headBranch: "feature",
+		baseBranch: "main",
+		headSha: "sha_feature",
+		baseSha: "sha_main",
+		mergeSha: null,
+		parentId: null,
+		...over,
+	} as PullRequest;
+}
+
+interface GitStub {
+	branches: Record<string, string>;
+	preview?: { status: "clean" | "conflicted"; conflicts?: { path: string }[] };
+	merge?: MergeResult;
+}
+
+function hosted(stub: GitStub) {
+	const git = {
+		listBranches: vi.fn().mockResolvedValue({
+			items: Object.entries(stub.branches).map(([name, sha]) => ({
+				name,
+				sha,
+				createdAt: null,
+			})),
+			nextCursor: null,
+			hasMore: false,
+		}),
+		previewMerge: vi.fn().mockResolvedValue({
+			status: stub.preview?.status ?? "clean",
+			mergeBaseSha: "sha_base",
+			baseSha: stub.branches.main,
+			headSha: stub.branches.feature,
+			conflicts: stub.preview?.conflicts ?? [],
+		}),
+		merge: vi.fn().mockResolvedValue(
+			stub.merge ?? {
+				merged: true,
+				sha: "sha_merged",
+				status: "clean",
+				conflicts: [],
+			},
+		),
+		deleteBranch: vi.fn().mockResolvedValue(undefined),
+	};
+	const repo: HostedRepo = {
+		ref: { owner: "adam", repo: "hello" },
+		defaultBranch: "main",
+		record: { id: "repo_1" } as Repository,
+		git: {
+			backend: "code-storage",
+			mergeStrategies: ["merge", "squash", "fast_forward"],
+			...git,
+		} as unknown as GitProvider,
+	};
+	return { repo, git };
+}
+
+beforeEach(() => {
+	vi.clearAllMocks();
+	vi.mocked(repositoryPermission).mockResolvedValue("write");
+	vi.mocked(prisma.pullRequest.findFirst).mockResolvedValue(pull());
+	vi.mocked(prisma.pullRequest.findMany).mockResolvedValue([]);
+	vi.mocked(prisma.pullRequest.count).mockResolvedValue(0);
+	vi.mocked(prisma.pullRequest.update).mockImplementation(
+		// biome-ignore lint/suspicious/noExplicitAny: prisma's update arg is generic
+		(async ({ data }: any) => ({ ...pull(), ...data })) as never,
+	);
+});
+
+describe("mergeHostedPull", () => {
+	it("merges through the provider with the base sha it verified", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+		});
+
+		const result = await mergeHostedPull(repo, actor, {
+			number: 7,
+			strategy: "squash",
+		});
+
+		expect(result).toMatchObject({ ok: true, sha: "sha_merged" });
+		expect(git.merge).toHaveBeenCalledWith(
+			repo.ref,
+			"main",
+			"feature",
+			expect.objectContaining({
+				strategy: "squash",
+				expectedBaseSha: "sha_main",
+			}),
+		);
+	});
+
+	it("refuses when the head branch moved since the diff was loaded", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_newer" },
+		});
+
+		const result = await mergeHostedPull(repo, actor, { number: 7 });
+
+		expect(result).toMatchObject({
+			ok: false,
+			error: expect.stringContaining("new commits"),
+		});
+		expect(git.merge).not.toHaveBeenCalled();
+		expect(prisma.pullRequest.update).toHaveBeenCalledWith(
+			expect.objectContaining({ data: { headSha: "sha_newer" } }),
+		);
+	});
+
+	it("does not ask the provider to merge a conflicted preview", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+			preview: { status: "conflicted", conflicts: [{ path: "src/a.ts" }] },
+		});
+
+		const result = await mergeHostedPull(repo, actor, { number: 7 });
+
+		expect(result).toMatchObject({
+			ok: false,
+			conflicts: [{ path: "src/a.ts" }],
+		});
+		expect(git.merge).not.toHaveBeenCalled();
+		expect(prisma.pullRequestEvent.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: expect.objectContaining({ kind: "conflicted" }),
+			}),
+		);
+	});
+
+	it("leaves the pull request open when the provider itself reports a conflict", async () => {
+		const { repo } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+			merge: {
+				merged: false,
+				sha: null,
+				status: "conflicted",
+				conflicts: [{ path: "src/b.ts", content: null }],
+			},
+		});
+
+		const result = await mergeHostedPull(repo, actor, { number: 7 });
+
+		expect(result).toMatchObject({ ok: false });
+		expect(prisma.pullRequest.update).not.toHaveBeenCalled();
+	});
+
+	it("refuses a viewer who cannot write, and a draft", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+		});
+		vi.mocked(repositoryPermission).mockResolvedValue("read");
+		expect(await mergeHostedPull(repo, actor, { number: 7 })).toMatchObject({
+			ok: false,
+			error: expect.stringContaining("write access"),
+		});
+
+		vi.mocked(repositoryPermission).mockResolvedValue("write");
+		vi.mocked(prisma.pullRequest.findFirst).mockResolvedValue(pull({ draft: true }));
+		expect(await mergeHostedPull(repo, actor, { number: 7 })).toMatchObject({
+			ok: false,
+			error: expect.stringContaining("draft"),
+		});
+		expect(git.merge).not.toHaveBeenCalled();
+	});
+
+	it("keeps a merged branch that another pull request is stacked on", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+		});
+		vi.mocked(prisma.pullRequest.count).mockResolvedValue(1);
+
+		await mergeHostedPull(repo, actor, { number: 7, deleteBranch: true });
+
+		expect(git.deleteBranch).not.toHaveBeenCalled();
+	});
+
+	it("lands a recorded resolution when the head branch itself conflicts", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+			preview: { status: "conflicted", conflicts: [{ path: "src/a.ts" }] },
+		});
+		vi.mocked(prisma.pullRequest.findFirst).mockResolvedValue(
+			pull({
+				resolutionBranch: "bh/resolve/7-sha_feature",
+				resolutionSha: "sha_resolved",
+				resolutionBy: "model",
+			}),
+		);
+		// The resolution branch is the one the backend calls clean.
+		git.previewMerge.mockImplementation(
+			async (_ref: unknown, _base: string, head: string) => ({
+				status:
+					head === "bh/resolve/7-sha_feature"
+						? "clean"
+						: "conflicted",
+				mergeBaseSha: "sha_base",
+				baseSha: "sha_main",
+				headSha: "sha_resolved",
+				conflicts:
+					head === "bh/resolve/7-sha_feature"
+						? []
+						: [{ path: "src/a.ts", content: null }],
+			}),
+		);
+
+		const result = await mergeHostedPull(repo, actor, { number: 7 });
+
+		expect(result).toMatchObject({ ok: true, sha: "sha_merged" });
+		expect(git.merge).toHaveBeenCalledWith(
+			repo.ref,
+			"main",
+			"bh/resolve/7-sha_feature",
+			expect.anything(),
+		);
+		// The throwaway branch does not outlive the merge it was made for.
+		expect(git.deleteBranch).toHaveBeenCalledWith(repo.ref, "bh/resolve/7-sha_feature");
+	});
+
+	it("drops a resolution made for an older head instead of merging it", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+			preview: { status: "conflicted", conflicts: [{ path: "src/a.ts" }] },
+		});
+		vi.mocked(prisma.pullRequest.findFirst).mockResolvedValue(
+			pull({
+				resolutionBranch: "bh/resolve/7-sha_older",
+				resolutionSha: "sha_resolved",
+				resolutionBy: "model",
+			}),
+		);
+
+		const result = await mergeHostedPull(repo, actor, { number: 7 });
+
+		expect(result).toMatchObject({ ok: false, conflicts: [{ path: "src/a.ts" }] });
+		expect(git.merge).not.toHaveBeenCalled();
+		expect(git.deleteBranch).toHaveBeenCalledWith(repo.ref, "bh/resolve/7-sha_older");
+		expect(prisma.pullRequest.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: {
+					resolutionBranch: null,
+					resolutionSha: null,
+					resolutionBy: null,
+				},
+			}),
+		);
+	});
+
+	it("refuses a rebase while the head is behind the base", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_moved", feature: "sha_feature" },
+		});
+
+		const result = await mergeHostedPull(repo, actor, {
+			number: 7,
+			strategy: "rebase",
+		});
+
+		expect(result).toMatchObject({
+			ok: false,
+			error: expect.stringContaining("update the branch"),
+		});
+		expect(git.merge).not.toHaveBeenCalled();
+	});
+
+	it("fast-forwards instead of rebasing on a backend that cannot rebase", async () => {
+		// The head already carries the base — the only case a fast-forward can
+		// stand in for a rebase at all.
+		const { repo, git } = hosted({
+			branches: { main: "sha_base", feature: "sha_feature" },
+		});
+
+		expect(
+			await mergeHostedPull(repo, actor, { number: 7, strategy: "rebase" }),
+		).toMatchObject({ ok: true });
+		expect(git.merge).toHaveBeenCalledWith(
+			repo.ref,
+			"main",
+			"feature",
+			expect.objectContaining({ strategy: "fast_forward" }),
+		);
+	});
+
+	it("asks a backend that really rebases for a rebase", async () => {
+		const { repo, git } = hosted({
+			// Behind the base, which only a real rebase can handle.
+			branches: { main: "sha_moved", feature: "sha_feature" },
+		});
+		Object.assign(repo.git, {
+			mergeStrategies: ["merge", "squash", "rebase"],
+		});
+
+		expect(
+			await mergeHostedPull(repo, actor, { number: 7, strategy: "rebase" }),
+		).toMatchObject({ ok: true });
+		expect(git.merge).toHaveBeenCalledWith(
+			repo.ref,
+			"main",
+			"feature",
+			expect.objectContaining({ strategy: "rebase" }),
+		);
+	});
+
+	it("numbers the merge commit once, whether or not the title carries it", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+		});
+		vi.mocked(prisma.pullRequest.findFirst).mockResolvedValue(
+			pull({ bodyMd: "Why it exists" }),
+		);
+
+		for (const [title, expected] of [
+			[undefined, "Add a thing (#7)\n\nWhy it exists"],
+			["Add a thing (#7)", "Add a thing (#7)\n\nWhy it exists"],
+			["Renamed", "Renamed (#7)\n\nWhy it exists"],
+		] as const) {
+			await mergeHostedPull(repo, actor, { number: 7, title });
+			expect(git.merge).toHaveBeenLastCalledWith(
+				repo.ref,
+				"main",
+				"feature",
+				expect.objectContaining({ message: expected }),
+			);
+		}
+	});
+
+	it("keeps the title when the merge sheet supplies its own body", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+		});
+
+		await mergeHostedPull(repo, actor, {
+			number: 7,
+			title: "Add a thing (#7)",
+			message: "Typed by the merger",
+		});
+
+		expect(git.merge).toHaveBeenCalledWith(
+			repo.ref,
+			"main",
+			"feature",
+			expect.objectContaining({
+				message: "Add a thing (#7)\n\nTyped by the merger",
+			}),
+		);
+	});
+
+	it("deletes the branch when nothing stacks on it", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+		});
+
+		await mergeHostedPull(repo, actor, { number: 7, deleteBranch: true });
+
+		expect(git.deleteBranch).toHaveBeenCalledWith(repo.ref, "feature");
+	});
+});
+
+describe("restacking a stack", () => {
+	const child = pull({
+		id: "pr_2",
+		number: 8,
+		headBranch: "feature-2",
+		baseBranch: "feature",
+		parentId: "pr_1",
+	});
+	const grandchild = pull({
+		id: "pr_3",
+		number: 9,
+		headBranch: "feature-3",
+		baseBranch: "feature-2",
+		parentId: "pr_2",
+	});
+
+	it("moves a direct child onto the merged base and carries commits further up", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+		});
+		vi.mocked(prisma.pullRequest.findMany)
+			.mockResolvedValueOnce([child])
+			.mockResolvedValueOnce([grandchild])
+			.mockResolvedValue([]);
+
+		const result = await mergeHostedPull(repo, actor, { number: 7 });
+
+		expect(result).toMatchObject({
+			ok: true,
+			restacked: [
+				{ number: 8, status: "restacked" },
+				{ number: 9, status: "restacked" },
+			],
+		});
+		// The child re-targets `main`; the grandchild keeps its own base, which
+		// still exists, and only takes the child's new commits.
+		expect(git.merge).toHaveBeenNthCalledWith(
+			2,
+			repo.ref,
+			"feature-2",
+			"main",
+			expect.anything(),
+		);
+		expect(git.merge).toHaveBeenNthCalledWith(
+			3,
+			repo.ref,
+			"feature-3",
+			"feature-2",
+			expect.anything(),
+		);
+	});
+
+	it("stops a limb at its first conflict and leaves what is above it alone", async () => {
+		const { repo, git } = hosted({
+			branches: { main: "sha_main", feature: "sha_feature" },
+		});
+		vi.mocked(prisma.pullRequest.findMany)
+			.mockResolvedValueOnce([child])
+			.mockResolvedValue([grandchild]);
+		git.merge
+			.mockResolvedValueOnce({
+				merged: true,
+				sha: "sha_merged",
+				status: "clean",
+				conflicts: [],
+			})
+			.mockResolvedValueOnce({
+				merged: false,
+				sha: null,
+				status: "conflicted",
+				conflicts: [{ path: "src/c.ts", content: null }],
+			});
+
+		const result = await mergeHostedPull(repo, actor, { number: 7 });
+
+		expect(result).toMatchObject({
+			ok: true,
+			restacked: [{ number: 8, status: "conflicted" }],
+		});
+		expect(git.merge).toHaveBeenCalledTimes(2);
+		expect(prisma.pullRequest.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: expect.objectContaining({
+					baseBranch: "main",
+					events: {
+						create: expect.objectContaining({
+							kind: "restack_conflicted",
+						}),
+					},
+				}),
+			}),
+		);
+	});
+});

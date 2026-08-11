@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "@/lib/auth";
 import { getOctokit } from "@/lib/github";
-import { threeWayMerge, type ConflictFileData } from "@/lib/three-way-merge";
+import { type BlobReader, conflictFiles, hostedConflicts } from "@/lib/pulls/conflicts";
+import { hostedRepo } from "@/lib/repos/hosted-source";
+import { repositoryPermission } from "@/lib/repos/registry";
 import { getErrorMessage } from "@/lib/utils";
-
-const MAX_FILES = 30;
 
 interface GitHubFileContent {
 	content: string;
@@ -22,6 +23,38 @@ export async function GET(request: NextRequest) {
 			{ error: "Missing required parameters: owner, repo, base, head" },
 			{ status: 400 },
 		);
+	}
+
+	// A pull request we own resolves against the git backend: its branches may
+	// not exist on GitHub at all.
+	const hosted = await hostedRepo(owner, repo);
+	if (hosted) {
+		// Conflict data is file content from both branches, so it is gated the
+		// same way resolving is: our own permissions, not GitHub's.
+		const session = await getServerSession();
+		const userId = session?.user?.id ?? null;
+		if (!userId) {
+			return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+		}
+		const permission = await repositoryPermission(hosted.record, userId);
+		if (permission !== "admin" && permission !== "write") {
+			return NextResponse.json(
+				{ error: "You do not have write access to this repository" },
+				{ status: 403 },
+			);
+		}
+		try {
+			return NextResponse.json(await hostedConflicts(hosted, base, head));
+		} catch (e: unknown) {
+			return NextResponse.json(
+				{
+					error:
+						getErrorMessage(e) ||
+						"Failed to compute merge conflicts",
+				},
+				{ status: 500 },
+			);
+		}
 	}
 
 	const octokit = await getOctokit();
@@ -48,28 +81,12 @@ export async function GET(request: NextRequest) {
 		const isFork = head.includes(":");
 		const headOwner = isFork ? head.split(":")[0] : owner;
 
-		const diffFiles = (comparison.files || []).slice(0, MAX_FILES);
-
-		if (diffFiles.length === 0) {
-			return NextResponse.json({
-				mergeBaseSha,
-				baseBranch: base,
-				headBranch: head,
-				files: [],
-			});
-		}
-
-		const fetchContent = async (
-			contentOwner: string,
-			contentRepo: string,
-			filePath: string,
-			ref: string,
-		): Promise<string | null> => {
+		const read: BlobReader = async (path, ref) => {
 			try {
 				const { data } = await octokit.repos.getContent({
-					owner: contentOwner,
-					repo: contentRepo,
-					path: filePath,
+					owner: ref === headSha ? headOwner : owner,
+					repo,
+					path,
 					ref,
 				});
 				if (Array.isArray(data) || data.type !== "file") return null;
@@ -80,124 +97,15 @@ export async function GET(request: NextRequest) {
 			}
 		};
 
-		const files: ConflictFileData[] = await Promise.all(
-			diffFiles.map(async (file) => {
-				const filePath = file.filename;
-
-				const [ancestorContent, baseContent, headContent] =
-					await Promise.all([
-						fetchContent(owner, repo, filePath, mergeBaseSha),
-						fetchContent(owner, repo, filePath, baseSha),
-						fetchContent(headOwner, repo, filePath, headSha),
-					]);
-
-				if (
-					ancestorContent === null &&
-					baseContent === null &&
-					headContent !== null
-				) {
-					return {
-						path: filePath,
-						hunks: [
-							{
-								type: "clean" as const,
-								resolvedLines:
-									headContent.split("\n"),
-							},
-						],
-						hasConflicts: false,
-						autoResolved: true,
-					};
-				}
-				if (
-					ancestorContent === null &&
-					headContent === null &&
-					baseContent !== null
-				) {
-					return {
-						path: filePath,
-						hunks: [
-							{
-								type: "clean" as const,
-								resolvedLines:
-									baseContent.split("\n"),
-							},
-						],
-						hasConflicts: false,
-						autoResolved: true,
-					};
-				}
-				if (baseContent === null && headContent === null) {
-					return {
-						path: filePath,
-						hunks: [],
-						hasConflicts: false,
-						autoResolved: true,
-					};
-				}
-
-				const ancestor = (ancestorContent ?? "").split("\n");
-				const baseLines = (baseContent ?? "").split("\n");
-				const headLines = (headContent ?? "").split("\n");
-
-				const baseChanged = baseContent !== ancestorContent;
-				const headChanged = headContent !== ancestorContent;
-
-				if (baseChanged && !headChanged) {
-					return {
-						path: filePath,
-						hunks: [
-							{
-								type: "clean" as const,
-								resolvedLines: baseLines,
-							},
-						],
-						hasConflicts: false,
-						autoResolved: true,
-					};
-				}
-				if (headChanged && !baseChanged) {
-					return {
-						path: filePath,
-						hunks: [
-							{
-								type: "clean" as const,
-								resolvedLines: headLines,
-							},
-						],
-						hasConflicts: false,
-						autoResolved: true,
-					};
-				}
-				if (!baseChanged && !headChanged) {
-					return {
-						path: filePath,
-						hunks: [
-							{
-								type: "clean" as const,
-								resolvedLines: ancestor,
-							},
-						],
-						hasConflicts: false,
-						autoResolved: true,
-					};
-				}
-
-				const result = threeWayMerge(ancestor, baseLines, headLines);
-				return {
-					path: filePath,
-					hunks: result.hunks,
-					hasConflicts: result.hasConflicts,
-					autoResolved: !result.hasConflicts,
-				};
-			}),
-		);
-
 		return NextResponse.json({
 			mergeBaseSha,
 			baseBranch: base,
 			headBranch: head,
-			files,
+			files: await conflictFiles(
+				(comparison.files || []).map((f) => f.filename),
+				read,
+				{ mergeBase: mergeBaseSha, base: baseSha, head: headSha },
+			),
 		});
 	} catch (e: unknown) {
 		const msg = getErrorMessage(e) || "Failed to compute merge conflicts";

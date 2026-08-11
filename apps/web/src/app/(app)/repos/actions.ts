@@ -4,13 +4,19 @@ import { getOctokit } from "@/lib/github";
 import { getErrorMessage } from "@/lib/utils";
 import { revalidatePath } from "next/cache";
 import { invalidateRepoCache } from "@/lib/repo-data-cache-vc";
+import { githubCoordinates, recordUpstreamStar } from "@/lib/repos/hosted-source";
+import { getServerSession } from "@/lib/auth";
 
 export async function starRepo(owner: string, repo: string) {
-	const octokit = await getOctokit();
-	if (!octokit) return { error: "Not authenticated" };
+	const [octokit, session] = await Promise.all([getOctokit(), getServerSession()]);
+	const userId = session?.user.id;
+	if (!octokit || !userId) return { error: "Not authenticated" };
 	try {
-		await octokit.activity.starRepoForAuthenticatedUser({ owner, repo });
+		await octokit.activity.starRepoForAuthenticatedUser({
+			...(await githubCoordinates(owner, repo)),
+		});
 		invalidateRepoCache(owner, repo);
+		await recordUpstreamStar(owner, repo, userId, true);
 		revalidatePath(`/repos/${owner}/${repo}`);
 		return { success: true };
 	} catch (e: unknown) {
@@ -19,11 +25,15 @@ export async function starRepo(owner: string, repo: string) {
 }
 
 export async function unstarRepo(owner: string, repo: string) {
-	const octokit = await getOctokit();
-	if (!octokit) return { error: "Not authenticated" };
+	const [octokit, session] = await Promise.all([getOctokit(), getServerSession()]);
+	const userId = session?.user.id;
+	if (!octokit || !userId) return { error: "Not authenticated" };
 	try {
-		await octokit.activity.unstarRepoForAuthenticatedUser({ owner, repo });
+		await octokit.activity.unstarRepoForAuthenticatedUser({
+			...(await githubCoordinates(owner, repo)),
+		});
 		invalidateRepoCache(owner, repo);
+		await recordUpstreamStar(owner, repo, userId, false);
 		revalidatePath(`/repos/${owner}/${repo}`);
 		return { success: true };
 	} catch (e: unknown) {

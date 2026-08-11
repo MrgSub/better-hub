@@ -521,6 +521,39 @@ function CommitDateGroup({
 	);
 }
 
+/** The commit detail's own shape — header, then a couple of file cards. */
+function CommitDetailSkeleton() {
+	return (
+		<div className="animate-pulse space-y-6 p-6">
+			<div className="space-y-3">
+				<div className="h-4 w-2/3 rounded bg-muted/30" />
+				<div className="flex items-center gap-2">
+					<div className="h-5 w-5 rounded-full bg-muted/30" />
+					<div className="h-2.5 w-40 rounded bg-muted/30" />
+				</div>
+			</div>
+			{[0, 1].map((i) => (
+				<div
+					key={i}
+					className="overflow-hidden rounded-md border border-border/40"
+				>
+					<div className="border-b border-border/40 bg-muted/10 px-3 py-2">
+						<div className="h-2.5 w-48 rounded bg-muted/30" />
+					</div>
+					<div className="space-y-2 p-3">
+						{[0, 1, 2, 3, 4].map((line) => (
+							<div
+								key={line}
+								className="h-2.5 rounded bg-muted/20"
+							/>
+						))}
+					</div>
+				</div>
+			))}
+		</div>
+	);
+}
+
 function CommitDetailSheet({
 	open,
 	onOpenChange,
@@ -530,6 +563,7 @@ function CommitDetailSheet({
 	commitDetail,
 	highlightData,
 	isLoading,
+	error,
 	sheetWidth,
 	isResizing,
 	onResize,
@@ -544,6 +578,7 @@ function CommitDetailSheet({
 	commitDetail: CommitDetailData | null;
 	highlightData: Record<string, Record<string, SyntaxToken[]>>;
 	isLoading: boolean;
+	error: string | null;
 	sheetWidth: number | null;
 	isResizing: boolean;
 	onResize: (clientX: number) => void;
@@ -593,9 +628,7 @@ function CommitDetailSheet({
 					</button>
 				</div>
 				{isLoading ? (
-					<div className="flex items-center justify-center h-full">
-						<Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-					</div>
+					<CommitDetailSkeleton />
 				) : commitDetail ? (
 					<CommitDetail
 						owner={owner}
@@ -606,7 +639,7 @@ function CommitDetailSheet({
 				) : (
 					<div className="flex items-center justify-center h-full">
 						<p className="text-sm text-muted-foreground">
-							Commit not found
+							{error ?? "Commit not found"}
 						</p>
 					</div>
 				)}
@@ -646,6 +679,7 @@ export function CommitsList({ owner, repo, commits, defaultBranch, branches }: C
 		Record<string, Record<string, SyntaxToken[]>>
 	>({});
 	const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+	const [detailError, setDetailError] = useState<string | null>(null);
 	const [sheetWidth, setSheetWidth] = useState<number | null>(null);
 	const [isResizing, setIsResizing] = useState(false);
 	const isMobile = useIsMobile();
@@ -828,11 +862,19 @@ export function CommitsList({ owner, repo, commits, defaultBranch, branches }: C
 			setIsLoadingDetail(true);
 			setCommitDetail(null);
 			setHighlightData({});
+			setDetailError(null);
 
-			const result = await fetchCommitDetail(owner, repo, sha);
-			setCommitDetail(result.commit);
-			setHighlightData(result.highlightData);
-			setIsLoadingDetail(false);
+			try {
+				const result = await fetchCommitDetail(owner, repo, sha);
+				setCommitDetail(result.commit);
+				setHighlightData(result.highlightData);
+			} catch {
+				// A read that fails still has to end the load, or the sheet
+				// waits forever on a commit that is never coming.
+				setDetailError("Could not load this commit.");
+			} finally {
+				setIsLoadingDetail(false);
+			}
 		},
 		[owner, repo],
 	);
@@ -927,6 +969,7 @@ export function CommitsList({ owner, repo, commits, defaultBranch, branches }: C
 				commitDetail={commitDetail}
 				highlightData={highlightData}
 				isLoading={isLoadingDetail}
+				error={detailError}
 				sheetWidth={sheetWidth}
 				isResizing={isResizing}
 				onResize={handleSheetResize}

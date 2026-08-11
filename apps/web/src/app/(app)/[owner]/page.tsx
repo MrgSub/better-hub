@@ -15,6 +15,7 @@ import {
 export const dynamic = "force-dynamic";
 import { ogImageUrl, ogImages } from "@/lib/og/og-utils";
 import { OrgDetailContent } from "@/components/orgs/org-detail-content";
+import { administersOrganization } from "@/lib/agents/namespace";
 import { UserProfileContent } from "@/components/users/user-profile-content";
 
 export async function generateMetadata({
@@ -105,6 +106,7 @@ export default async function OwnerPage({ params }: { params: Promise<{ owner: s
 					updated_at: repo.updated_at ?? null,
 					pushed_at: repo.pushed_at ?? null,
 				}))}
+				canAdminister={await administersOrganization(orgData.login)}
 			/>
 		);
 	}

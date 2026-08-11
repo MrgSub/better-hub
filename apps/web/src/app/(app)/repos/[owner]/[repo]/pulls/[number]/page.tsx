@@ -34,6 +34,7 @@ import { PRMergePanel } from "@/components/pr/pr-merge-panel";
 import { PRCommentForm } from "@/components/pr/pr-comment-form";
 import { PRReviewForm } from "@/components/pr/pr-review-form";
 import { PRConflictResolver } from "@/components/pr/pr-conflict-resolver";
+import { hasRepositoryAgent } from "@/lib/agents/connection";
 import { PRAuthorDossier } from "@/components/pr/pr-author-dossier";
 import { PRChecksPanel } from "@/components/pr/pr-checks-panel";
 import { PROverviewPanel } from "@/components/pr/pr-overview-panel";
@@ -41,7 +42,8 @@ import { ChatPageActivator } from "@/components/shared/chat-page-activator";
 import { TrackView } from "@/components/shared/track-view";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import { inngest } from "@/lib/inngest";
+import { reportContentViewed } from "@/lib/inngest";
+import { hostedRepo } from "@/lib/repos/hosted-source";
 import { isItemPinned } from "@/lib/pinned-items-store";
 import { all } from "better-all";
 
@@ -224,34 +226,31 @@ export default async function PRDetailPage({
 
 	// Fire-and-forget: embed PR content for semantic search
 	if (session?.user?.id) {
-		void inngest.send({
-			name: "app/content.viewed",
-			data: {
-				userId: session.user.id,
-				contentType: "pr",
-				owner,
-				repo,
-				number: pullNumber,
-				title: pr.title,
-				body: pr.body ?? "",
-				comments: comments.issueComments
-					.filter((c) => c.body)
-					.map((c) => ({
-						id: c.id,
-						body: c.body,
-						author: c.user?.login ?? "unknown",
-						createdAt: c.created_at,
-					})),
-				reviews: reviews
-					.filter((r) => r.body)
-					.map((r) => ({
-						id: r.id,
-						body: r.body!,
-						author: r.user?.login ?? "unknown",
-						state: r.state,
-						createdAt: r.submitted_at ?? "",
-					})),
-			},
+		reportContentViewed({
+			userId: session.user.id,
+			contentType: "pr",
+			owner,
+			repo,
+			number: pullNumber,
+			title: pr.title,
+			body: pr.body ?? "",
+			comments: comments.issueComments
+				.filter((c) => c.body)
+				.map((c) => ({
+					id: c.id,
+					body: c.body,
+					author: c.user?.login ?? "unknown",
+					createdAt: c.created_at,
+				})),
+			reviews: reviews
+				.filter((r) => r.body)
+				.map((r) => ({
+					id: r.id,
+					body: r.body!,
+					author: r.user?.login ?? "unknown",
+					state: r.state,
+					createdAt: r.submitted_at ?? "",
+				})),
 		});
 	}
 
@@ -386,6 +385,12 @@ export default async function PRDetailPage({
 	const highlightData = await highlightPromise;
 
 	const showConflictResolver = sp.resolve === "conflicts" && isOpen;
+	// Only a pull request we own can be resolved by an agent — it needs to commit
+	// through our git backend — and only when whoever owns it has connected one,
+	// so the button is absent rather than offering something that would refuse.
+	const hostedForResolve = showConflictResolver ? await hostedRepo(owner, repo) : null;
+	const canResolveAutomatically =
+		!!hostedForResolve && (await hasRepositoryAgent(hostedForResolve.record));
 	const headSha = pr.head.sha;
 	const headBranch = pr.head.ref;
 	const baseSha = pr.base.sha;
@@ -451,6 +456,9 @@ export default async function PRDetailPage({
 							headBranch={pr.head.ref}
 							headRepoOwner={pr.head_repo_owner}
 							headRepoName={pr.head_repo_name}
+							canResolveAutomatically={
+								canResolveAutomatically
+							}
 						/>
 					) : undefined
 				}

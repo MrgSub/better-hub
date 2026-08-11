@@ -143,6 +143,7 @@ import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Link from "next/link";
+import { APP_URL } from "@/lib/app-url";
 import { toInternalUrl, parseGitHubUrl } from "@/lib/github-utils";
 import { useSession } from "@/lib/auth-client";
 import { useGlobalChatOptional } from "@/components/shared/global-chat-provider";
@@ -405,9 +406,8 @@ function createGhostMarkdownComponents(
 					</Link>
 				);
 			}
-			const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-			if (href && appUrl && href.startsWith(appUrl)) {
-				const path = href.slice(appUrl.replace(/\/$/, "").length);
+			if (href && href.startsWith(APP_URL)) {
+				const path = href.slice(APP_URL.replace(/\/$/, "").length);
 				return (
 					<Link href={path} {...props}>
 						{children}

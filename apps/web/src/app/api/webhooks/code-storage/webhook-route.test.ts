@@ -31,7 +31,7 @@ async function signature(rawBody: string): Promise<string> {
 async function deliver(event: string, body: unknown, header?: string | null) {
 	const rawBody = typeof body === "string" ? body : JSON.stringify(body);
 	return await POST(
-		new Request("https://better-hub.com/api/webhooks/code-storage", {
+		new Request("https://orkd.ai/api/webhooks/code-storage", {
 			method: "POST",
 			body: rawBody,
 			headers: {

@@ -244,7 +244,7 @@ function ExtensionBanner() {
 				>
 					browser extension
 				</a>{" "}
-				to automatically redirect GitHub links to Better Hub.
+				to automatically redirect GitHub links to Orkd.
 			</p>
 			<button
 				onClick={() => {

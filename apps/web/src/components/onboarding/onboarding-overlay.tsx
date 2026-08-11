@@ -30,7 +30,7 @@ function getGhostWelcomeResponse() {
 	const modI = formatForDisplay("Mod+I");
 	const modSlash = formatForDisplay("Mod+/");
 
-	return `Hey! Welcome to Better Hub. I'm Ghost, your AI assistant. Here's what I can help with:
+	return `Hey! Welcome to Orkd. I'm Ghost, your AI assistant. Here's what I can help with:
 
 - **Review PRs and code** — I can summarize changes, spot issues, and help you understand diffs
 - **Navigate repos** — ask me about any file, function, or piece of code
@@ -232,7 +232,7 @@ export function OnboardingOverlay({
 						</p>
 
 						<p className="text-[13px] sm:text-[14px] text-white/50 leading-[1.8] sm:leading-[1.85] mt-4 ob-fade-up-d1">
-							Welcome to Better Hub. At {""}
+							Welcome to Orkd. At {""}
 							<a
 								href="https://better-auth.com"
 								target="_blank"

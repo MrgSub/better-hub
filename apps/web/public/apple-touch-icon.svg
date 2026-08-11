@@ -1,4 +1,7 @@
-<svg width="180" height="180" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="128" height="128" rx="24" fill="#111111"/>
-  <text x="50%" y="54%" dominant-baseline="central" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="400" font-size="80" fill="white" letter-spacing="-2">B.</text>
+<svg width="180" height="180" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" rx="14" fill="#0A0A0A"/>
+  <g fill="none" stroke-width="6" stroke-linecap="round">
+    <path d="M32 13V51" stroke="#FAFAF9"/>
+    <circle cx="32" cy="32" r="11" stroke="#7C5CFF"/>
+  </g>
 </svg>

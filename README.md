@@ -1,12 +1,14 @@
-![Better Hub](readme.png)
+![Orkd](readme.png)
 
-# Better Hub
+# Orkd
 
-Re-imagining code collaboration — a better place to collaborate on code, for humans and agents.
+Re-imagining code collaboration — a better place to collaborate on code, for humans and agents. Lives at [orkd.ai](https://orkd.ai).
+
+Orkd is based on [Better Hub](https://github.com/better-auth/better-hub), and grew out of it: where Better Hub is a better client for GitHub, Orkd hosts the git data itself, so browsing, pull requests and merges keep working when GitHub does not.
 
 ## Why
 
-At Better Auth, we spend a lot of our time on GitHub. So we decided to build the experience we actually wanted. Better Hub improves everything from the home page to repo overview, PR reviews, and AI integration — faster and more pleasant overall.
+At Better Auth, we spend a lot of our time on GitHub. So we decided to build the experience we actually wanted. Orkd improves everything from the home page to repo overview, PR reviews, and AI integration — faster and more pleasant overall.
 
 ## Features
 
@@ -18,7 +20,7 @@ At Better Auth, we spend a lot of our time on GitHub. So we decided to build the
 - **CI/CD status** — view workflow runs and compare across branches
 - **Security advisories** — track vulnerabilities per repo
 - **Keyboard-first** — most actions accessible via shortcuts
-- **Browser extension** — adds a "Open in Better Hub" button on GitHub pages (Chrome & Firefox supported)
+- **Browser extension** — adds a "Open in Orkd" button on GitHub pages (Chrome & Firefox supported)
 
 ## Contributing
 

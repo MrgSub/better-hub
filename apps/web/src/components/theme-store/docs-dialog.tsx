@@ -16,7 +16,7 @@ import { HighlightedCodeBlock } from "@/components/shared/highlighted-code-block
 type DocType = "theme" | "icon-theme";
 
 const COLOR_THEME_MANIFEST = `{
-  "$schema": "https://better-hub.com/schemas/theme-manifest.schema.json",
+  "$schema": "https://orkd.ai/schemas/theme-manifest.schema.json",
   "name": "My Theme",
   "description": "A beautiful color theme",
   "version": "1.0.0",
@@ -27,7 +27,7 @@ const COLOR_THEME_MANIFEST = `{
 }`;
 
 const COLOR_THEME_DATA = `{
-  "$schema": "https://better-hub.com/schemas/theme-data.schema.json",
+  "$schema": "https://orkd.ai/schemas/theme-data.schema.json",
   "dark": {
     "accentPreview": "#7c3aed",
     "bgPreview": "#09090b",
@@ -51,7 +51,7 @@ const COLOR_THEME_DATA = `{
 }`;
 
 const ICON_THEME_MANIFEST = `{
-  "$schema": "https://better-hub.com/schemas/icon-theme-manifest.schema.json",
+  "$schema": "https://orkd.ai/schemas/icon-theme-manifest.schema.json",
   "name": "My Icon Theme",
   "description": "A file icon theme",
   "version": "1.0.0",
@@ -62,7 +62,7 @@ const ICON_THEME_MANIFEST = `{
 }`;
 
 const ICON_THEME_DATA = `{
-  "$schema": "https://better-hub.com/schemas/icon-theme-data.schema.json",
+  "$schema": "https://orkd.ai/schemas/icon-theme-data.schema.json",
   "baseURL": "https://raw.githubusercontent.com/you/repo/HEAD/icons/",
   "defaultFile": "file",
   "defaultFolder": "folder",
@@ -84,11 +84,11 @@ const ICON_THEME_DATA = `{
   ]
 }`;
 
-const COLOR_THEME_PROMPT = `Create a Better Hub color theme in this repo. Generate the following files:
+const COLOR_THEME_PROMPT = `Create an Orkd color theme in this repo. Generate the following files:
 
-1. \`better-hub-extension.json\` (at repo root) — the manifest:
+1. \`orkd-extension.json\` (at repo root) — the manifest:
 {
-  "$schema": "https://better-hub.com/schemas/theme-manifest.schema.json",
+  "$schema": "https://orkd.ai/schemas/theme-manifest.schema.json",
   "name": "<theme name>",
   "description": "<short description>",
   "version": "1.0.0",
@@ -106,15 +106,15 @@ const COLOR_THEME_PROMPT = `Create a Better Hub color theme in this repo. Genera
 The "colors" object MUST include ALL of these keys:
 --background, --foreground, --card, --card-foreground, --primary, --primary-foreground, --secondary, --secondary-foreground, --muted, --muted-foreground, --accent, --accent-foreground, --border, --input, --ring, --destructive, --success, --warning, --scrollbar-thumb, --scrollbar-thumb-hover, --shader-bg, --shader-filter, --hero-border, --diff-add-bar, --diff-del-bar, --diff-mod-bar, --link, --info, --code-bg, --code-block-bg, --inline-code-bg, --line-gutter, --line-highlight, --search-highlight, --search-highlight-active, --selection-bg, --table-row-alt, --diff-add-bg, --diff-del-bg, --diff-add-text, --diff-del-text, --diff-add-gutter, --diff-del-gutter, --diff-word-add, --diff-word-del, --alert-note, --alert-tip, --alert-important, --alert-warning, --alert-caution, --contrib-0, --contrib-1, --contrib-2, --contrib-3, --contrib-4
 
-Use "$schema": "https://better-hub.com/schemas/theme-data.schema.json" at the top of theme.json for validation.
+Use "$schema": "https://orkd.ai/schemas/theme-data.schema.json" at the top of theme.json for validation.
 
 Design a cohesive, visually appealing theme with good contrast and readability. Make sure the dark and light variants feel related but are properly tuned for their respective modes.`;
 
-const ICON_THEME_PROMPT = `Create a Better Hub file icon theme in this repo. Generate the following files:
+const ICON_THEME_PROMPT = `Create an Orkd file icon theme in this repo. Generate the following files:
 
-1. \`better-hub-extension.json\` (at repo root) — the manifest:
+1. \`orkd-extension.json\` (at repo root) — the manifest:
 {
-  "$schema": "https://better-hub.com/schemas/icon-theme-manifest.schema.json",
+  "$schema": "https://orkd.ai/schemas/icon-theme-manifest.schema.json",
   "name": "<theme name>",
   "description": "<short description>",
   "version": "1.0.0",
@@ -126,7 +126,7 @@ const ICON_THEME_PROMPT = `Create a Better Hub file icon theme in this repo. Gen
 
 2. \`icons/icon-theme.json\` — the icon mapping file:
 {
-  "$schema": "https://better-hub.com/schemas/icon-theme-data.schema.json",
+  "$schema": "https://orkd.ai/schemas/icon-theme-data.schema.json",
   "baseURL": "https://raw.githubusercontent.com/<owner>/<repo>/HEAD/icons/",
   "defaultFile": "file",
   "defaultFolder": "folder",
@@ -253,7 +253,7 @@ function ColorThemeDocs() {
 					<>
 						Add{" "}
 						<code className="text-[10px] bg-muted px-1 py-0.5 rounded font-mono">
-							better-hub-extension.json
+							orkd-extension.json
 						</code>
 					</>
 				}
@@ -263,7 +263,7 @@ function ColorThemeDocs() {
 				</p>
 				<CodeBlock
 					code={COLOR_THEME_MANIFEST}
-					filename="better-hub-extension.json"
+					filename="orkd-extension.json"
 				/>
 			</Step>
 
@@ -332,7 +332,7 @@ function IconThemeDocs() {
 					<>
 						Add{" "}
 						<code className="text-[10px] bg-muted px-1 py-0.5 rounded font-mono">
-							better-hub-extension.json
+							orkd-extension.json
 						</code>
 					</>
 				}
@@ -354,7 +354,7 @@ function IconThemeDocs() {
 				</p>
 				<CodeBlock
 					code={ICON_THEME_MANIFEST}
-					filename="better-hub-extension.json"
+					filename="orkd-extension.json"
 				/>
 			</Step>
 

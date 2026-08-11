@@ -329,7 +329,7 @@ export function parseGitHubUrl(htmlUrl: string): ParsedGitHubUrl | null {
 					return { owner, repo, type: "action_run", runId };
 				}
 			}
-			// /actions/:runId/job/:jobId (better-hub style)
+			// /actions/:runId/job/:jobId (orkd style)
 			if (rest[1]) {
 				const runId = parsePositiveInt(rest[1]);
 				if (runId !== null) {

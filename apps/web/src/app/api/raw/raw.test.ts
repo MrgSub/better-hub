@@ -37,7 +37,7 @@ function hosted(overrides: Partial<Repository> = {}, content = png) {
 }
 
 function request(path = "/api/raw/adam/hello/logo.png") {
-	return new NextRequest(new URL(path, "https://better-hub.com"));
+	return new NextRequest(new URL(path, "https://orkd.ai"));
 }
 
 function params(path: string[]) {

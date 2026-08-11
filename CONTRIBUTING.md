@@ -1,4 +1,4 @@
-# Contributing to Better Hub
+# Contributing to Orkd
 
 Thanks for your interest in contributing! This guide covers what you need to get started.
 

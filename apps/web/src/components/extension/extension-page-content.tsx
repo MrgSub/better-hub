@@ -49,14 +49,14 @@ const STEPS = [
 		number: "05",
 		title: "Load the extension",
 		description:
-			'Click "Load unpacked" in the top-left area, then select the unzipped folder. The Better Hub extension will appear in your extensions list.',
+			'Click "Load unpacked" in the top-left area, then select the unzipped folder. The Orkd extension will appear in your extensions list.',
 		icon: Chrome,
 	},
 	{
 		number: "06",
 		title: "Pin it & go",
 		description:
-			"Click the puzzle icon in your toolbar and pin Better Hub for easy access. Visit any GitHub page — it will automatically redirect to Better Hub.",
+			"Click the puzzle icon in your toolbar and pin Orkd for easy access. Visit any GitHub page — it will automatically redirect to Orkd.",
 		icon: Zap,
 	},
 ];
@@ -94,14 +94,14 @@ const FIREFOX_STEPS = [
 		number: "05",
 		title: "Load temporary add-on",
 		description:
-			'Click "Load Temporary Add-on" and select the manifest in the unzipped folder. The Better Hub extension will appear in your add-ons list.',
+			'Click "Load Temporary Add-on" and select the manifest in the unzipped folder. The Orkd extension will appear in your add-ons list.',
 		icon: Chrome,
 	},
 	{
 		number: "06",
 		title: "Pin it & go",
 		description:
-			"Click the puzzle icon in your toolbar and pin Better Hub for easy access. Visit any GitHub page — it will automatically redirect to Better Hub.",
+			"Click the puzzle icon in your toolbar and pin Orkd for easy access. Visit any GitHub page — it will automatically redirect to Orkd.",
 		icon: Zap,
 	},
 ];
@@ -152,7 +152,7 @@ export function ExtensionPageContent() {
 					<div className="flex-1 min-w-0">
 						<div className="flex items-center gap-2">
 							<h1 className="text-xl font-medium tracking-tight">
-								Better Hub Extension
+								Orkd Extension
 							</h1>
 							<span className="text-[9px] font-mono px-1.5 py-0.5 border border-border text-muted-foreground/60 rounded-sm uppercase tracking-wider">
 								v1.0.0
@@ -160,7 +160,7 @@ export function ExtensionPageContent() {
 						</div>
 						<p className="text-sm text-muted-foreground mt-1">
 							Automatically redirects GitHub links to your
-							Better Hub instance.
+							Orkd instance.
 						</p>
 						<div className="flex items-center gap-1 mt-3">
 							<button
@@ -361,7 +361,7 @@ export function ExtensionPageContent() {
 							<p className="text-xs text-muted-foreground mt-1 leading-relaxed max-w-lg">
 								The extension defaults to{" "}
 								<code className="text-[11px] font-mono px-1 py-0.5 bg-muted rounded text-foreground/70">
-									https://better-hub.com
+									https://orkd.ai
 								</code>
 								. You can change this anytime by
 								clicking the extension icon in your

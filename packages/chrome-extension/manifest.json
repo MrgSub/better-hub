@@ -1,8 +1,8 @@
 {
 	"manifest_version": 3,
-	"name": "Better Hub",
+	"name": "Orkd",
 	"version": "1.0.0",
-	"description": "Redirect GitHub pages to your Better Hub instance",
+	"description": "Redirect GitHub pages to your Orkd instance",
 	"permissions": ["storage", "declarativeNetRequest", "activeTab", "webNavigation"],
 	"host_permissions": ["*://github.com/*"],
 	"icons": {

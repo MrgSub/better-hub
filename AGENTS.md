@@ -1,9 +1,12 @@
-# Better Hub AGENTS.md
+# Orkd AGENTS.md
+
+Orkd is based on Better Hub; the repository, packages and git remote still carry
+the better-hub name.
 
 ## Production Information
 
-- The origin for better-hub is: https://better-hub.com
-  in
+- The origin for orkd is: https://orkd.ai
+- The domain it moved from, https://better-hub.com, still resolves here
 
 ## Design
 

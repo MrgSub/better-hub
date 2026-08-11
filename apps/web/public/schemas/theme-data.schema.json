@@ -1,8 +1,8 @@
 {
 	"$schema": "http://json-schema.org/draft-07/schema#",
-	"$id": "https://better-hub.com/schemas/theme-data.schema.json",
-	"title": "Better Hub Color Theme Data",
-	"description": "Schema for the color theme data file referenced by the \"main\" field in better-hub-extension.json. Defines dark and light variants with HSL color tokens.",
+	"$id": "https://orkd.ai/schemas/theme-data.schema.json",
+	"title": "Orkd Color Theme Data",
+	"description": "Schema for the color theme data file referenced by the \"main\" field in orkd-extension.json. Defines dark and light variants with HSL color tokens.",
 	"type": "object",
 	"required": ["dark", "light"],
 	"additionalProperties": false,
@@ -220,7 +220,7 @@
 	},
 	"examples": [
 		{
-			"$schema": "https://better-hub.com/schemas/theme-data.schema.json",
+			"$schema": "https://orkd.ai/schemas/theme-data.schema.json",
 			"dark": {
 				"accentPreview": "#7c3aed",
 				"bgPreview": "#09090b",

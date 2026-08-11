@@ -26,7 +26,7 @@ const jetbrainsMono = JetBrains_Mono({
 	subsets: ["latin"],
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://better-hub.com";
+const siteUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://orkd.ai";
 
 export const viewport: Viewport = {
 	themeColor: "#000000",
@@ -34,29 +34,29 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
 	title: {
-		default: "Better Hub",
-		template: "%s | Better Hub",
+		default: "Orkd",
+		template: "%s | Orkd",
 	},
 	description: "Re-imagining code collaboration for humans and agents.",
 	metadataBase: new URL(siteUrl),
 	openGraph: {
-		title: "Better Hub",
+		title: "Orkd",
 		description: "Re-imagining code collaboration for humans and agents.",
-		siteName: "Better Hub",
+		siteName: "Orkd",
 		url: siteUrl,
 		images: [
 			{
 				url: "/og.png",
 				width: 1200,
 				height: 630,
-				alt: "Better Hub",
+				alt: "Orkd",
 			},
 		],
 		type: "website",
 	},
 	twitter: {
 		card: "summary_large_image",
-		title: "Better Hub",
+		title: "Orkd",
 		description: "Re-imagining code collaboration for humans and agents.",
 		images: ["/og.png"],
 	},

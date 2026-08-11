@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { GitProvider } from "./provider";
 import type { RepoRef } from "./types";
 
-const AUTHOR = { name: "Better Hub Contract", email: "contract@better-hub.com" };
+const AUTHOR = { name: "Orkd Contract", email: "contract@orkd.ai" };
 
 function text(bytes: Uint8Array): string {
 	return new TextDecoder().decode(bytes);

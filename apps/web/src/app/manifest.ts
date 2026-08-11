@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
 	return {
-		name: "Better Hub",
-		short_name: "Better Hub",
+		name: "Orkd",
+		short_name: "Orkd",
 		description: "Re-imagining code collaboration for humans and agents.",
 		start_url: "/",
 		display: "standalone",

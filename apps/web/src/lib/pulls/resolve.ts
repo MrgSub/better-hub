@@ -264,8 +264,8 @@ async function land(
 				`Resolve conflicts between ${pull.headBranch} and ${pull.baseBranch}` +
 					`\n\nResolved by ${by} for #${pull.number}.`,
 			author: {
-				name: actor.name ?? actor.login ?? "better-hub",
-				email: `${actor.login ?? "better-hub"}@users.noreply.better-hub.com`,
+				name: actor.name ?? actor.login ?? "orkd",
+				email: `${actor.login ?? "orkd"}@users.noreply.orkd.ai`,
 			},
 			expectedHeadSha: o.baseSha,
 			files,

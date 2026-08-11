@@ -240,8 +240,8 @@ export function AccountTab({ user, settings, onUpdate, githubProfile }: AccountT
 					GitHub Permissions
 				</label>
 				<p className="mt-1 text-[10px] text-muted-foreground/50 font-mono">
-					Manage which GitHub permissions are granted to Better Hub.
-					Toggle scopes and click update to re-authorize.
+					Manage which GitHub permissions are granted to Orkd. Toggle
+					scopes and click update to re-authorize.
 				</p>
 
 				{scopesLoading ? (

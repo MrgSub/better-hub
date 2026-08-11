@@ -66,10 +66,10 @@ export function hostedMergeMethods(h: HostedRepo): {
 }
 
 function gitActor(actor: PullAuthor) {
-	const login = actor.login ?? "better-hub";
+	const login = actor.login ?? "orkd";
 	return {
 		name: actor.name ?? login,
-		email: `${login}@users.noreply.better-hub.com`,
+		email: `${login}@users.noreply.orkd.ai`,
 	};
 }
 

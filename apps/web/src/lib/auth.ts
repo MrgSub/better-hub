@@ -29,7 +29,7 @@ async function getOctokitUser(token: string) {
 }
 
 export const auth = betterAuth({
-	appName: "Better Hub",
+	appName: "Orkd",
 	database: prismaAdapter(prisma, {
 		provider: "postgresql",
 	}),
@@ -75,9 +75,7 @@ export const auth = betterAuth({
 					}),
 				]
 			: []),
-		...(process.env.VERCEL
-			? [oAuthProxy({ productionURL: "https://www.better-hub.com" })]
-			: []),
+		...(process.env.VERCEL ? [oAuthProxy({ productionURL: "https://orkd.ai" })] : []),
 	],
 	user: {
 		additionalFields: {
@@ -132,10 +130,15 @@ export const auth = betterAuth({
 	},
 	trustedOrigins: [
 		// Production
-		"https://www.better-hub.com",
+		"https://orkd.ai",
+		"https://www.orkd.ai",
 		// Vercel preview
+		"https://orkd-*-better-auth.vercel.app",
 		"https://better-hub-*-better-auth.vercel.app",
 		// Beta site
+		"https://beta.orkd.ai",
+		// The domain we came from, until it stops resolving here
+		"https://www.better-hub.com",
 		"https://beta.better-hub.com",
 	],
 	advanced: {

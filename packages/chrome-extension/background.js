@@ -1,4 +1,4 @@
-const DEFAULT_HOST = "https://better-hub.com";
+const DEFAULT_HOST = "https://orkd.ai";
 
 // Track tabs on the logout page so we can avoid redirecting github.com/
 // after logout (declarativeNetRequest cancels the request mid-flight

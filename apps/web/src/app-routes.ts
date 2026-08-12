@@ -1,6 +1,8 @@
 export const APP_ROUTES = new Set([
 	"dashboard",
 	"repos",
+	"migrate",
+	"extension",
 	"issues",
 	"theme-store",
 	"prs",

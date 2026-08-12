@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "@/lib/auth";
 import { safeRedirect } from "@/lib/utils";
 import { HalftoneBackground } from "@/components/ui/halftone-background";
+import { LogoGlyph } from "@/components/ui/logo";
 import { LoginButton } from "@/components/login-button";
 import { DemoVideoDialog } from "@/components/demo-video";
 
@@ -66,17 +67,7 @@ export default async function HomePage({
 				className="hero-in absolute top-6 left-2 sm:left-4 z-30 flex items-center gap-1"
 				style={{ animationDelay: "0.2s" }}
 			>
-				<svg
-					className="size-5"
-					viewBox="0 0 64 64"
-					fill="none"
-					xmlns="http://www.w3.org/2000/svg"
-				>
-					<g fill="none" strokeWidth="6" strokeLinecap="round">
-						<path d="M32 13V51" stroke="currentColor" />
-						<circle cx="32" cy="32" r="11" stroke="#7C5CFF" />
-					</g>
-				</svg>
+				<LogoGlyph className="size-5" />
 				<span className="text-sm tracking-tight text-foreground">
 					ORKD.
 				</span>

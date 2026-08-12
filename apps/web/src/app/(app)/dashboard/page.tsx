@@ -9,6 +9,7 @@ import {
 	getTrendingRepos,
 } from "@/lib/github";
 import { DashboardContent } from "@/components/dashboard/dashboard-content";
+import { hostedOnlyRepositories } from "@/lib/repos/user-repos";
 import { all } from "better-all";
 
 export const metadata: Metadata = {
@@ -39,13 +40,20 @@ export default async function DashboardPage() {
 			trending: async () => await getTrendingRepos(undefined, "weekly", 8),
 		});
 
+	// Repositories that only exist here have no GitHub payload to come back in
+	// `repos`, so without this the dashboard cannot show what we host.
+	const hosted = await hostedOnlyRepositories(
+		session.user.id,
+		repos.map((r) => r.full_name),
+	);
+
 	return (
 		<DashboardContent
 			user={githubUser}
 			reviewRequests={reviewRequests}
 			myOpenPRs={myOpenPRs}
 			myIssues={myIssues}
-			repos={repos}
+			repos={[...hosted, ...repos]}
 			notifications={notifications}
 			activity={activity}
 			trending={trending}

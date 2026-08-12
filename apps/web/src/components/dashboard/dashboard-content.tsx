@@ -27,6 +27,7 @@ import {
 	Loader2,
 	Pin,
 	PinOff,
+	Import,
 } from "lucide-react";
 import { cn, formatNumber } from "@/lib/utils";
 import { TimeAgo } from "@/components/ui/time-ago";
@@ -581,7 +582,21 @@ function ReposTabs({
 					</Link>
 				)}
 				{(tab === "repos" || tab === "pinned") && (
-					<div className="ml-auto mr-3">
+					<div className="ml-auto mr-3 flex items-center gap-3">
+						<Link
+							href="/migrate"
+							className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground/70 hover:text-foreground transition-colors"
+						>
+							<Import className="w-3 h-3" />
+							Migrate
+						</Link>
+						<Link
+							href="/repos"
+							className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground/70 hover:text-foreground transition-colors"
+						>
+							See all
+							<ChevronRight className="w-3 h-3" />
+						</Link>
 						<CreateRepoDialog />
 					</div>
 				)}

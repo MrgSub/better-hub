@@ -8,6 +8,9 @@ import {
 	resolveUpstream,
 } from "@/lib/migrate";
 
+/** An import copies every ref of the upstream into the git backend. */
+export const maxDuration = 300;
+
 async function actor() {
 	const session = await getServerSession();
 	const token = session?.githubUser?.accessToken;

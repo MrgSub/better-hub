@@ -47,6 +47,12 @@ import { hostedRepo } from "@/lib/repos/hosted-source";
 import { isItemPinned } from "@/lib/pinned-items-store";
 import { all } from "better-all";
 
+/**
+ * Merging, restacking and agent conflict resolution are server actions on this
+ * segment, and each waits on the git backend while holding the repository lease.
+ */
+export const maxDuration = 300;
+
 export async function generateMetadata({
 	params,
 }: {

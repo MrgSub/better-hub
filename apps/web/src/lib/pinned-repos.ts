@@ -2,7 +2,8 @@ const STORAGE_KEY = "better-github-pinned-repos";
 const MAX_PINNED = 10;
 
 export interface PinnedRepo {
-	id: number;
+	/** GitHub numbers its repositories; ours are keyed by their Orkd id. */
+	id: number | string;
 	full_name: string;
 	name: string;
 	description?: string | null;

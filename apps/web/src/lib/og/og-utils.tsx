@@ -96,7 +96,7 @@ export function BrandWatermark() {
 				letterSpacing: "0.05em",
 			}}
 		>
-			BETTER-HUB.
+			ORKD.
 		</div>
 	);
 }

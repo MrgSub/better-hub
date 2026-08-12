@@ -15,7 +15,8 @@ export interface IssueItem {
 }
 
 export interface RepoItem {
-	id: number;
+	/** GitHub numbers its repositories; ours are keyed by their Orkd id. */
+	id: number | string;
 	name: string;
 	full_name: string;
 	description: string | null;

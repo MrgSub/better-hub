@@ -97,7 +97,7 @@ function getMemoryTools(userId: string) {
 	const client = getSupermemoryClient();
 	if (!client) return {};
 
-	const containerTag = `user-${userId}`;
+	const namespace = `user-${userId}`;
 
 	return {
 		saveMemory: tool({
@@ -111,10 +111,9 @@ function getMemoryTools(userId: string) {
 					),
 			}),
 			execute: async ({ content }) => {
-				await client.add({
+				await client.add(namespace, {
 					content,
-					containerTag,
-					entityContext:
+					supportingContext:
 						"This is a memory from a GitHub power-user using a GitHub client app called Better GitHub. Extract preferences, decisions, project context, and important facts the user wants remembered across conversations.",
 				});
 				return { saved: true };
@@ -132,11 +131,11 @@ function getMemoryTools(userId: string) {
 					),
 			}),
 			execute: async ({ query }) => {
-				const results = await client.search.memories({
-					q: query,
-					containerTag,
+				const results = await client.search(namespace, {
+					query,
 					limit: 5,
 					searchMode: "hybrid",
+					threshold: 0.6,
 				});
 				if (!results.results || results.results.length === 0) {
 					return {
@@ -172,11 +171,11 @@ async function recallMemoriesForContext(userId: string, messages: UIMessage[]): 
 	if (!query || query.length < 5) return "";
 
 	try {
-		const results = await client.search.memories({
-			q: query,
-			containerTag: `user-${userId}`,
+		const results = await client.search(`user-${userId}`, {
+			query,
 			limit: 3,
 			searchMode: "hybrid",
+			threshold: 0.6,
 		});
 
 		if (!results.results || results.results.length === 0) return "";
